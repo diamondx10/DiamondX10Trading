@@ -13,7 +13,10 @@ risk:
   max_drawdown_pct: 10.0
   default_stop_loss_pct: 2.0
 data:
-  # provider: simulated | <tên provider thật của bạn>
+  # provider: simulated | mt5
+  #   simulated: du lieu mo phong (mac dinh, khong can MT5).
+  #   mt5: du lieu thoi gian thuc tu MT5 terminal (Exness DEMO).
+  #   Xem docs/mt5-demo.md truoc khi doi sang mt5.
   provider: simulated
   # api_key: "ĐIỀN VÀO config.yaml, KHÔNG commit"
   # api_key_env: DIAMONDX10_API_KEY
@@ -22,3 +25,15 @@ data:
     us_securities: ["NVDA", "AMD", "CDNS"]
     xauusd: ["XAUUSD"]
     crypto: ["BTCUSD", "ETHUSD"]
+mt5:
+  # CHI TAI KHOAN DEMO. Connector nay tu choi tai khoan that (xem execution.py).
+  demo_only: true
+  # Dien vao config.yaml LOCAL (khong commit): so tai khoan demo Exness.
+  login: 0
+  # Dien ten server demo that, vd "Exness-MT5Trial7" — xem trong MT5 terminal.
+  server: ""
+  # Mat khau demo: KHONG ghi vao file nay. Dat bien moi truong MT5_PASSWORD
+  # (khuyen dung) hoac them dong password: ... vao config.yaml local.
+  password_env: MT5_PASSWORD
+  # Khung nen lay tu MT5: M1, M5, M15, H1, D1 (mac dinh M15).
+  timeframe: M15

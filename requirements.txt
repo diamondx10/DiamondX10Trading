@@ -2,3 +2,6 @@
 # Khi nối provider thật, thêm client của provider đó vào đây.
 pyyaml>=6.0
 pytest>=8.0
+# MetaTrader5: TUY CHON, chi khi chay MT5 demo tren Windows.
+# Khong cai o day (Linux khong chay duoc MT5 terminal):
+#   pip install MetaTrader5
