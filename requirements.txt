@@ -1,0 +1,4 @@
+# DiamondX10 Trading — chỉ dùng thư viện chuẩn cho bộ khung demo.
+# Khi nối provider thật, thêm client của provider đó vào đây.
+pyyaml>=6.0
+pytest>=8.0

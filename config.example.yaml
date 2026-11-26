@@ -1,0 +1,24 @@
+# DiamondX10 Trading — COPY thành config.yaml và điền thông tin thật của bạn.
+# KHÔNG commit config.yaml (đã có trong .gitignore). Không để API key trong repo.
+fund:
+  name: DiamondX10
+  total_capital_usd: 2000
+  desks:
+    forex: {manager: "Yuling Pan", capital_usd: 500}
+    us_securities: {manager: "Kathy", capital_usd: 500}
+    xauusd: {manager: "Yumi", capital_usd: 500}
+    crypto: {manager: "Rich", capital_usd: 500}
+risk:
+  max_risk_per_trade_pct: 1.0
+  max_drawdown_pct: 10.0
+  default_stop_loss_pct: 2.0
+data:
+  # provider: simulated | <tên provider thật của bạn>
+  provider: simulated
+  # api_key: "ĐIỀN VÀO config.yaml, KHÔNG commit"
+  # api_key_env: DIAMONDX10_API_KEY
+  symbols:
+    forex: ["EURUSD", "USDJPY", "GBPUSD"]
+    us_securities: ["NVDA", "AMD", "CDNS"]
+    xauusd: ["XAUUSD"]
+    crypto: ["BTCUSD", "ETHUSD"]
