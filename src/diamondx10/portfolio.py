@@ -1,5 +1,5 @@
-"""Quan ly von theo desk: moi desk 500 USD, tong 2000 USD.
-LJ/Kel xay nen tang, khong giao dich trong 2000 USD nay."""
+"""Quan ly von theo desk: moi desk 2500 USD, tong 10000 USD.
+LJ/Kel xay nen tang, khong giao dich trong 10000 USD nay."""
 from dataclasses import dataclass, field
 
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 class Desk:
     name: str
     manager: str
-    capital_usd: float = 500.0
+    capital_usd: float = 2500.0
     positions: dict = field(default_factory=dict)
 
 

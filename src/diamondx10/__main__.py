@@ -34,13 +34,42 @@ def _mt5_context(cfg, desk, symbol=None, mt5_module=None):
     return feed, mt5, account, server
 
 
-def _desk_symbol(cfg, desk, symbol):
+def _desk_symbols(cfg, desk, symbol):
+    """Tat ca symbol cua desk; --symbol thi chi lay 1 symbol do."""
     if symbol:
-        return symbol
+        return [symbol]
     symbols = (cfg.get("data", {}).get("symbols", {}) or {}).get(desk) or []
     if not symbols:
         raise ValueError(f"Chua cau hinh symbol cho desk {desk!r} trong config.yaml")
-    return symbols[0]
+    return list(symbols)
+
+
+def split_desk_capital(desk_cap, n_symbols):
+    """Chia von desk deu cho n symbol; moi symbol chi dung 1 phan von
+    de tinh size, tranh dat qua tay khi nhieu symbol cung co tin hieu."""
+    if n_symbols <= 0:
+        return 0.0
+    return desk_cap / n_symbols
+
+
+def stop_and_target(entry, action, sl_pct, tp_pct):
+    """Tinh stop loss va take profit theo % gia vao.
+    BUY: SL duoi gia, TP tren gia. SELL: nguoc lai. Tra (sl, tp)."""
+    if action == "BUY":
+        return entry * (1 - sl_pct), entry * (1 + tp_pct)
+    return entry * (1 + sl_pct), entry * (1 - tp_pct)
+
+
+def risk_pct_for_symbol(cfg, symbol):
+    """% rui ro moi lenh cho 1 symbol: lay trong bang per_symbol_pct neu co,
+    khong thi dung muc chung max_risk_per_trade_pct. Chi nhung symbol can
+    rui ro cao moi dat duoc 0.01 lot (EURUSD 3%, XAUUSD 10%, BTCUSD 8%)
+    moi co trong bang; con lai giu muc chung thap."""
+    risk_cfg = (cfg or {}).get("risk") or {}
+    table = risk_cfg.get("per_symbol_pct") or {}
+    if symbol in table:
+        return float(table[symbol])
+    return float(risk_cfg.get("max_risk_per_trade_pct", 1.0))
 
 
 def main(argv=None):
@@ -105,56 +134,72 @@ def main(argv=None):
             feed.close()
     elif args.cmd in ("mt5-dry-run", "mt5-trade"):
         mode = "DRY-RUN" if args.cmd == "mt5-dry-run" else "TRADE"
-        symbol = _desk_symbol(cfg, args.desk, args.symbol)
-        print(f"DiamondX10 MT5 DEMO [{mode}] — desk {args.desk}, symbol {symbol}")
+        symbols = _desk_symbols(cfg, args.desk, args.symbol)
+        print(f"DiamondX10 MT5 DEMO [{mode}] — desk {args.desk}, "
+              f"symbols {', '.join(symbols)}")
         print("CHI TAI KHOAN DEMO. Khong bao gio dat lenh that.")
-        try:
-            feed, mt5, account, server = _mt5_context(cfg, args.desk, symbol)
-        except (ImportError, ConnectionError, ValueError) as exc:
-            print(f"LOI: {exc}")
-            return 1
-        try:
-            if not account_is_demo(mt5, account, server):
-                raise SystemExit(
-                    "TU CHOI: tai khoan MT5 dang dang nhap KHONG phai demo "
-                    f"(server={server!r}). Chi chay demo."
-                )
-            bars = feed.bars(60)
-            sig = generate_signals(args.desk, bars)
-            print(f"Gia moi nhat {symbol}: {feed.latest_price(symbol)}")
-            print(f"Tin hieu: {sig}")
-            if args.cmd == "mt5-dry-run":
-                log_decision(symbol, f"DRY-RUN-{sig['action']}",
-                             f"MT5 demo dry-run: {sig['reason']} [khong gui lenh]",
-                             desk=args.desk,
-                             manager=cfg["fund"]["desks"][args.desk]["manager"])
-                print("OK: dry-run xong, KHONG dat lenh. Xem decisions/decisions-log.csv")
-                return
-            if sig["action"] == "HOLD":
-                print("Tin hieu HOLD — khong dat lenh.")
-                return
-            pf = Portfolio.from_config(cfg)
-            desk_cap = pf.desks[args.desk].capital_usd
-            risk_pct = cfg["risk"]["max_risk_per_trade_pct"]
-            entry = feed.latest_price(symbol)
-            sl_pct = cfg["risk"]["default_stop_loss_pct"] / 100.0
-            sl = entry * (1 - sl_pct) if sig["action"] == "BUY" else entry * (1 + sl_pct)
-            from .execution import CONTRACT_SIZES
+        pf = Portfolio.from_config(cfg)
+        desk_cap = pf.desks[args.desk].capital_usd
+        per_symbol_cap = split_desk_capital(desk_cap, len(symbols))
+        print(f"Von desk {desk_cap:.0f} USD chia cho {len(symbols)} symbol: "
+              f"{per_symbol_cap:.0f} USD/symbol de tinh size.")
+        sl_pct = cfg["risk"]["default_stop_loss_pct"] / 100.0
+        tp_pct = cfg["risk"].get("default_take_profit_pct", 5.0) / 100.0
+        failed = 0
+        for symbol in symbols:
+            print(f"--- {symbol} "
+                  f"(rui ro {risk_pct_for_symbol(cfg, symbol):g}%/lenh) ---")
+            try:
+                feed, mt5, account, server = _mt5_context(cfg, args.desk, symbol)
+            except (ImportError, ConnectionError, ValueError) as exc:
+                print(f"LOI ({symbol}): {exc}")
+                failed += 1
+                continue
+            try:
+                if not account_is_demo(mt5, account, server):
+                    raise SystemExit(
+                        "TU CHOI: tai khoan MT5 dang dang nhap KHONG phai demo "
+                        f"(server={server!r}). Chi chay demo."
+                    )
+                bars = feed.bars(60)
+                sig = generate_signals(args.desk, bars)
+                print(f"Gia moi nhat {symbol}: {feed.latest_price(symbol)}")
+                print(f"Tin hieu: {sig}")
+                if args.cmd == "mt5-dry-run":
+                    log_decision(symbol, f"DRY-RUN-{sig['action']}",
+                                 f"MT5 demo dry-run: {sig['reason']} [khong gui lenh]",
+                                 desk=args.desk,
+                                 manager=cfg["fund"]["desks"][args.desk]["manager"])
+                    print("OK: dry-run xong, KHONG dat lenh.")
+                    continue
+                if sig["action"] == "HOLD":
+                    print("Tin hieu HOLD — khong dat lenh.")
+                    continue
+                entry = feed.latest_price(symbol)
+                sl, tp = stop_and_target(entry, sig["action"], sl_pct, tp_pct)
+                from .execution import CONTRACT_SIZES
 
-            contract = CONTRACT_SIZES.get(args.desk, 100000)
-            volume = args.volume or position_size_lots(
-                desk_cap, risk_pct, entry, sl, contract_size=contract)
-            if volume <= 0:
-                print("Volume tinh duoc = 0 — khong dat lenh (kiem tra risk/entry/SL).")
-                return
-            result = place_demo_order(
-                mt5, symbol=symbol, action=sig["action"], volume=volume,
-                price=entry, sl=sl, desk=args.desk,
-                manager=cfg["fund"]["desks"][args.desk]["manager"],
-                cfg=cfg, account_info=account, server=server)
-            print(f"OK: lenh DEMO da gui: {result}")
-        finally:
-            feed.close()
+                contract = CONTRACT_SIZES.get(args.desk, 100000)
+                risk_pct = risk_pct_for_symbol(cfg, symbol)
+                volume = args.volume or position_size_lots(
+                    per_symbol_cap, risk_pct, entry, sl, contract_size=contract)
+                if volume <= 0:
+                    print("Volume tinh duoc = 0 — khong dat lenh "
+                          "(kiem tra risk/entry/SL).")
+                    continue
+                result = place_demo_order(
+                    mt5, symbol=symbol, action=sig["action"], volume=volume,
+                    price=entry, sl=sl, tp=tp, desk=args.desk,
+                    manager=cfg["fund"]["desks"][args.desk]["manager"],
+                    cfg=cfg, account_info=account, server=server)
+                print(f"OK: lenh DEMO da gui: {result}")
+            finally:
+                feed.close()
+        print(f"Xong {mode} desk {args.desk} ({len(symbols)} symbol). "
+              f"Xem decisions/decisions-log.csv")
+        if failed:
+            print(f"Co {failed}/{len(symbols)} symbol loi.")
+            return 1
 
 
 if __name__ == "__main__":

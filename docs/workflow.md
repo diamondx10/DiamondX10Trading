@@ -4,7 +4,7 @@
 2. **LJ và Kel** cài đặt lý thuyết đó thành chiến lược/model trong `src/`.
 3. **Ai phụ trách mảng nào viết bài nghiên cứu/nhận định mảng đó**
    (xem `research/README.md`).
-4. Mỗi desk giao dịch với vốn giả định 500 USD; quyết định mua/bán được
+4. Mỗi desk giao dịch với vốn giả định 2.500 USD (tổng 10.000 USD); quyết định mua/bán được
    ghi vào `decisions/decisions-log.csv` và thông báo cho cả nhóm.
 5. Nghiên cứu và giao dịch dùng dữ liệu thời gian thực qua `DataFeed`;
    dữ liệu mô phỏng chỉ dùng cho demo/test.

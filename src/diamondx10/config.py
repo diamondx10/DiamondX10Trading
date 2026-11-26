@@ -3,13 +3,14 @@ from pathlib import Path
 import yaml
 
 DEFAULT = {
-    "fund": {"name": "DiamondX10", "total_capital_usd": 2000,
-             "desks": {"forex": {"manager": "Yuling Pan", "capital_usd": 500},
-                       "us_securities": {"manager": "Kathy", "capital_usd": 500},
-                       "xauusd": {"manager": "Yumi", "capital_usd": 500},
-                       "crypto": {"manager": "Rich", "capital_usd": 500}}},
+    "fund": {"name": "DiamondX10", "total_capital_usd": 10000,
+             "desks": {"forex": {"manager": "Yuling Pan", "capital_usd": 2500},
+                       "us_securities": {"manager": "Kathy", "capital_usd": 2500},
+                       "xauusd": {"manager": "Yumi", "capital_usd": 2500},
+                       "crypto": {"manager": "Rich", "capital_usd": 2500}}},
     "risk": {"max_risk_per_trade_pct": 1.0, "max_drawdown_pct": 10.0,
-             "default_stop_loss_pct": 2.0},
+             "default_stop_loss_pct": 5.0, "default_take_profit_pct": 5.0,
+             "per_symbol_pct": {"EURUSD": 3.0, "XAUUSD": 10.0, "BTCUSD": 8.0}},
     "data": {"provider": "simulated"},
 }
 

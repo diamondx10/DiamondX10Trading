@@ -167,7 +167,7 @@ def place_demo_order(mt5, *, symbol, action, volume, price, sl, tp=None,
         "type_time": getattr(mt5, "ORDER_TIME_GTC", 0),
         "type_filling": getattr(mt5, "ORDER_FILLING_IOC", 1),
     }
-    reason = f"DEMO {action} {symbol} {volume} lot @ {price} (SL {sl})"
+    reason = f"DEMO {action} {symbol} {volume} lot @ {price} (SL {sl}, TP {tp or 0.0})"
     if dry_run:
         log_decision(symbol, f"DRY-RUN-{action}", reason + " [dry-run, khong gui lenh]",
                      desk=desk, manager=manager)

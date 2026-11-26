@@ -200,3 +200,135 @@ def test_build_feed_mt5_uses_fake_module():
     feed = build_feed(cfg, "forex", mt5_module=FakeMT5())
     assert feed.symbol == "EURUSD"
     assert len(feed.bars(5)) == 5
+
+
+def test_desk_symbols_returns_all_symbols():
+    from diamondx10.__main__ import _desk_symbols, split_desk_capital
+    cfg = {"data": {"symbols": {
+        "crypto": ["BTCUSD", "BNBUSD", "ETHUSD"],
+        "us_securities": ["AMD", "CDNS", "SNPS", "INTC", "NVDA"],
+    }}}
+    assert _desk_symbols(cfg, "crypto", None) == ["BTCUSD", "BNBUSD", "ETHUSD"]
+    assert _desk_symbols(cfg, "us_securities", None) == ["AMD", "CDNS", "SNPS", "INTC", "NVDA"]
+    # --symbol van chi lay 1 symbol do.
+    assert _desk_symbols(cfg, "crypto", "ETHUSD") == ["ETHUSD"]
+    with pytest.raises(ValueError):
+        _desk_symbols(cfg, "forex", None)
+
+
+def test_split_desk_capital():
+    from diamondx10.__main__ import split_desk_capital
+    assert split_desk_capital(2500, 1) == 2500
+    assert split_desk_capital(2500, 5) == 500
+    assert split_desk_capital(2500, 3) == pytest.approx(2500 / 3)
+    assert split_desk_capital(2500, 0) == 0.0
+    # Von chia deu: BTC voi 833 USD/symbol, stop 2% o gia 90.000
+    # thi van duoi 0.01 lot — test ghi lai gioi han that nay.
+    assert position_size_lots(2500 / 3, 1.0, 90000, 90000 * 0.98,
+                              contract_size=1) == 0.0
+    # Nhung ETH thi dat duoc voi cung muc von chia.
+    assert position_size_lots(2500 / 3, 1.0, 3000, 3000 * 0.98,
+                              contract_size=1) == 0.13
+
+
+def test_stop_and_target_buy_sell():
+    from diamondx10.__main__ import stop_and_target
+    sl, tp = stop_and_target(100.0, "BUY", 0.05, 0.05)
+    assert (sl, tp) == (95.0, 105.0)
+    sl, tp = stop_and_target(100.0, "SELL", 0.05, 0.05)
+    assert (sl, tp) == (105.0, 95.0)
+
+
+def test_place_demo_order_passes_tp(monkeypatch):
+    mt5 = FakeMT5()
+    logged = []
+    monkeypatch.setattr("diamondx10.execution.log_decision",
+                        lambda *a, **k: logged.append((a, k)))
+    result = place_demo_order(
+        mt5, symbol="EURUSD", action="BUY", volume=0.01, price=1.16,
+        sl=1.102, tp=1.218, desk="forex", manager="Yuling Pan",
+        cfg=LIVE_CFG, account_info=mt5.account_info(),
+        server="Exness-MT5Trial7")
+    assert result["status"] == "SENT"
+    assert mt5.sent_orders[0]["tp"] == pytest.approx(1.218)
+    assert "TP 1.218" in logged[0][0][2]
+
+
+def test_sl_5pct_sizing_regression():
+    # Stop loss 5% + rui ro 1%: khoi luong cang nho. Ghi lai he qua that:
+    # EURUSD voi 2.500 USD/desk cung khong du 0.01 lot.
+    assert position_size_lots(2500, 1.0, 1.16, 1.16 * 0.95,
+                              contract_size=100000) == 0.0
+    # Vang van 0; ETH/BNB/chung khoan thi dat duoc.
+    assert position_size_lots(2500, 1.0, 4000, 4000 * 0.95,
+                              contract_size=100) == 0.0
+    assert position_size_lots(2500 / 3, 1.0, 3000, 3000 * 0.95,
+                              contract_size=1) == 0.05
+    assert position_size_lots(500, 1.0, 180, 180 * 0.95,
+                              contract_size=1) == 0.55
+
+
+def test_risk_10pct_all_symbols_min_lot():
+    # Quyet dinh 2026-11-26: tang rui ro len 10%/lenh de moi symbol
+    # dat duoc it nhat 0.01 lot o stop 5%. Gia minh hoa; vang 8% chi
+    # vua du o gia 4.000 (len 5.000 thi lai ve 0) nen chon 10%.
+    cases = [
+        ("EURUSD", 1.16, 100000, 2500),
+        ("XAUUSD", 4000, 100, 2500),
+        ("XAUUSD@5000", 5000, 100, 2500),
+        ("BTCUSD", 90000, 1, 2500 / 3),
+        ("BTCUSD@120k", 120000, 1, 2500 / 3),
+        ("ETHUSD", 3000, 1, 2500 / 3),
+        ("BNBUSD", 900, 1, 2500 / 3),
+        ("NVDA", 180, 1, 500),
+        ("AMD", 200, 1, 500),
+        ("SNPS", 450, 1, 500),
+        ("INTC", 40, 1, 500),
+        ("CDNS", 350, 1, 500),
+    ]
+    for _name, entry, contract, cap in cases:
+        lots = position_size_lots(cap, 10.0, entry, entry * 0.95,
+                                  contract_size=contract)
+        assert lots >= 0.01, _name
+    # 8% thi vang len 5.000 lai ve 0 — ghi lai de sau nay khoi quay ve 8%.
+    assert position_size_lots(2500, 8.0, 5000, 5000 * 0.95,
+                              contract_size=100) == 0.0
+
+
+def test_risk_pct_for_symbol():
+    from diamondx10.__main__ import risk_pct_for_symbol
+    cfg = {"risk": {"max_risk_per_trade_pct": 1.0,
+                    "per_symbol_pct": {"EURUSD": 3.0, "XAUUSD": 10.0, "BTCUSD": 8.0}}}
+    assert risk_pct_for_symbol(cfg, "EURUSD") == 3.0
+    assert risk_pct_for_symbol(cfg, "XAUUSD") == 10.0
+    assert risk_pct_for_symbol(cfg, "BTCUSD") == 8.0
+    # Symbol khong co trong bang dung muc chung 1%.
+    assert risk_pct_for_symbol(cfg, "ETHUSD") == 1.0
+    assert risk_pct_for_symbol(cfg, "NVDA") == 1.0
+    assert risk_pct_for_symbol({}, "EURUSD") == 1.0
+
+
+def test_per_symbol_risk_all_symbols_min_lot():
+    # Rui ro theo symbol (muc chung 1%, chi EURUSD 3%, XAUUSD 10%,
+    # BTCUSD 8%): moi symbol dat duoc it nhat 0.01 lot o stop 5%.
+    # Gia tham chieu co bien (vang 5.000, BTC 120.000).
+    from diamondx10.__main__ import risk_pct_for_symbol
+    cfg = {"risk": {"max_risk_per_trade_pct": 1.0,
+                    "per_symbol_pct": {"EURUSD": 3.0, "XAUUSD": 10.0, "BTCUSD": 8.0}}}
+    cases = [
+        ("EURUSD", 1.16, 100000, 2500),
+        ("XAUUSD", 5000, 100, 2500),
+        ("BTCUSD", 120000, 1, 2500 / 3),
+        ("ETHUSD", 3000, 1, 2500 / 3),
+        ("BNBUSD", 900, 1, 2500 / 3),
+        ("NVDA", 180, 1, 500),
+        ("AMD", 200, 1, 500),
+        ("SNPS", 450, 1, 500),
+        ("INTC", 40, 1, 500),
+        ("CDNS", 350, 1, 500),
+    ]
+    for name, entry, contract, cap in cases:
+        rpct = risk_pct_for_symbol(cfg, name)
+        lots = position_size_lots(cap, rpct, entry, entry * 0.95,
+                                  contract_size=contract)
+        assert lots >= 0.01, name

@@ -16,13 +16,13 @@ giao dịch do **Yuling Pan** nghiên cứu.
 
 | Desk | Người phụ trách | Chuyên môn | Vốn giả định |
 |---|---|---|---|
-| Forex | Yuling Pan | Forex | 500 USD |
-| US Securities | Kathy | Chứng khoán Mỹ — AI, chip, EDA tool | 500 USD |
-| XAUUSD | Yumi | Vàng (XAUUSD) | 500 USD |
-| Crypto | Rich | Crypto | 500 USD |
-| **Tổng DiamondX10** | | | **2.000 USD** |
+| Forex | Yuling Pan | Forex | 2.500 USD |
+| US Securities | Kathy | Chứng khoán Mỹ — AI, chip, EDA tool | 2.500 USD |
+| XAUUSD | Yumi | Vàng (XAUUSD) | 2.500 USD |
+| Crypto | Rich | Crypto | 2.500 USD |
+| **Tổng DiamondX10** | | | **10.000 USD** |
 
-LJ và Kel xây nền tảng, không giao dịch trong 2.000 USD này.
+LJ và Kel xây nền tảng, không giao dịch trong 10.000 USD này.
 
 ## Chức vụ trong tổ chức (khác chuyên môn)
 
@@ -55,8 +55,7 @@ python3 -m diamondx10 mt5-dry-run --desk forex       # lấy giá thật, chỉ 
 python3 -m diamondx10 mt5-trade --desk forex         # đặt lệnh DEMO (có chặn demo-only, stop loss bắt buộc)
 ```
 
-Lưu ý: vốn desk 500 USD, rủi ro 1%/lệnh thì volume tính ra có thể < 0.01 lot
-với stop loss 2% — lúc đó tool không đặt lệnh (xem mục 5 trong `docs/mt5-demo.md`).
+Lưu ý: rủi ro theo từng symbol (mức chung 1%/lệnh; EURUSD 3%, XAUUSD 10%, BTCUSD 8%), stop loss 5% — mọi symbol tính ra từ 0,01 lot trở lên (xem mục 5 trong `docs/mt5-demo.md`).
 
 ## Cấu trúc
 
@@ -69,7 +68,7 @@ src/diamondx10/
   execution.py   # khớp lệnh DEMO qua MT5, chặn demo-only, sizing theo risk
   strategies/    # base + 1 chiến lược mẫu cho mỗi desk
   models/quant.py# chỉ báo: SMA, RSI, ATR, volatility
-  portfolio.py   # chia vốn theo desk, 500 USD/desk
+  portfolio.py   # chia vốn theo desk, 2.500 USD/desk
   risk.py        # position sizing, max drawdown, stop-loss
   signals.py     # tín hiệu BUY/SELL/HOLD + lý do
   decisions.py   # ghi quyết định mua/bán vào decisions/

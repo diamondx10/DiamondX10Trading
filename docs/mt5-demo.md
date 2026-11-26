@@ -16,6 +16,25 @@ Tool co 2 che do du lieu:
 Ban demo / backtest / signals cu van chay voi `simulated` nhu truoc,
 khong anh huong gi.
 
+## 0. Chay nhanh — quickstart.py (khuyen dung)
+
+Tren may Windows co MT5 terminal, chi can:
+
+```bash
+python quickstart.py
+```
+
+Script se tu: cai `requirements.txt` + `MetaTrader5`; hoi server demo,
+so login demo va mat khau demo luc chay (mat khau nhap an, chi giu trong
+bo nho luc chay, KHONG ghi vao file); ghi `config.yaml` local; dang nhap
+MT5 va kiem tra chac chan la tai khoan DEMO; kiem tra symbol; roi dry-run
+tin hieu cho ca 4 desk. Mac dinh KHONG dat lenh. Muon dat lenh demo thi
+chay `python quickstart.py --trade` roi go ro `dat lenh` de xac nhan.
+
+```bash
+python quickstart.py --skip-install   # bo qua buoc cai goi pip
+```
+
 ## 1. Tao tai khoan Exness demo
 
 1. Vao trang Exness, tao tai khoan demo (khong nap tien that).
@@ -84,9 +103,9 @@ python -m diamondx10 mt5-dry-run --desk us_securities --symbol NVDA
 python -m diamondx10 mt5-trade --desk forex --symbol EURUSD
 ```
 
-Volume mac dinh duoc tinh tu von desk (500 USD) va
-`max_risk_per_trade_pct` (1%) trong config, lam tron xuong buoc 0.01 lot.
-Muon tu chon volume: them `--volume 0.01`.
+Volume mac dinh duoc tinh tu von desk (2.500 USD, chia deu cho cac
+symbol cua desk) va `max_risk_per_trade_pct` (1%) trong config, lam tron
+xuong buoc 0.01 lot. Muon tu chon volume: them `--volume 0.01`.
 
 ## 5. Gioi han can biet
 
@@ -97,13 +116,15 @@ Muon tu chon volume: them `--volume 0.01`.
   thuong co, **CDNS co the khong co** tren server demo. Chay
   `mt5-symbols` de kiem tra; neu thieu thi doi symbol cho desk
   us_securities hoac dung nguon du lieu khac cho desk do.
-- **Von desk nho, rui ro 1% rat chat:** von 500 USD/desk, lo toi da
-  5 USD/lenh. Voi stop loss 2% va lot toi thieu 0.01, nhieu symbol
-  (Forex, XAUUSD) se tinh ra volume < 0.01 lot — luc do tool se khong
-  dat lenh va bao volume = 0. De giao dich demo duoc thi can siet stop
-  loss lai (vi du 0.2–0.5%), hoac chap nhan rui ro/lenh cao hon 1%,
-  hoac doi symbol co bien dong phu hop hon. Day la gioi han that cua
-  von nho, khong phai loi code.
+- **Rủi ro theo từng symbol — mọi symbol đặt được ít nhất 0,01 lot,
+  mức chung vẫn là 1%/lệnh:** EURUSD 3% (0,01 lot, lỗ tối đa 75 USD),
+  XAUUSD 10% (0,01 lot, 250 USD), BTCUSD 8% (0,01 lot, 67 USD),
+  ETH 0,05 lot, BNB 0,18 lot, nhóm chứng khoán 0,22–2,50 lot — tất cả
+  tính ở stop 5%, đã kiểm chứng bằng code. Trước đó nhóm đã thử một con
+  số chung 10% cho mọi lệnh rồi bỏ, vì nó bắt cả những mã không cần phải
+  chịu rủi ro cao. **Còn một điểm nhóm cần biết:** một lệnh vàng thua là
+  lỗ 250 USD = 10% vốn desk = đúng giới hạn drawdown tối đa, nên desk
+  vàng coi như chỉ được phép thua 1 lệnh trước khi chạm giới hạn.
 - **MT5 terminal phai mo trong suot luc chay tool.** Tat terminal la
   mat ket noi du lieu va khong dat lenh duoc.
 - **Khong co gia that / lenh that trong repo:** repo chi co code va
