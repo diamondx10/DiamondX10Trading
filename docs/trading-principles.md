@@ -694,6 +694,30 @@
     dong moi nhat + dong trang thai (dang chay / da dung, gio bat
     dau, ma thoat). Khong co thanh tien do phan tich buoc o v1 —
     dong log tho la nguon that.
+57. **[ĐÃ CÓ — 2026-11-27] Nut Khoi dong tat ca (START ALL) tren
+    tab Quan ly + ly do Manager dich theo ngon ngu**
+    (`webui/src/components/Manager.tsx`, `webui/src/api.ts`,
+    `src/diamondx10/webapi.py` `/api/start-all`,
+    `src/diamondx10/procman.py`, `src/diamondx10/i18n.py`,
+    xem `docs/web-ui.md` §9): nut **Khoi dong tat ca (Live +
+    Listener)** o dau muc Dieu khien goi `POST /api/start-all`
+    — khoi dong ca vong Live (che do recommend, desk forex) va
+    Telegram listener trong 1 lan bam, qua dung helper
+    `_start_proc` nhu nut rieng; moi thanh phan khoi dong doc
+    lap (1 cai loi thi cai kia van thu), tra ve
+    `{"live": {"ok","reason"}, "listener": {"ok","reason"}}`,
+    giao dien hien ca hai ly do. Goi lai khi da chay la
+    idempotent: thanh phan da chay tra `ok: true` (ly do "dang
+    chay"), khong khoi dong lai, van 200. Moi ly do tra ve cho
+    tab Quan ly (khoi dong / da chay / loi spawn / thoat ngay,
+    che do live sai, log sai ten tien trinh, kill switch sai
+    truong, telegram-test) deu dich theo ngon ngu dang chon
+    (VI | EN, theo `language:` trong config, mac dinh `vi`):
+    tieng Viet co dau day du, tieng Anh dich het, khong con
+    manh tieng Viet khong dau trong ban tieng Anh; ten tien
+    trinh hien thi cung duoc dich qua
+    `i18n.proc_display_name`, chi tiet ky thuat giu nguyen
+    dang goc.
 
 ## 8. Những điểm đang lệch giữa nghiên cứu và code
 

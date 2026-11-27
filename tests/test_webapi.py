@@ -577,6 +577,136 @@ def test_listener_start_stop_fake_proc(base, monkeypatch):
     assert body["running"] is False
 
 
+# --- API: start-all (Live + listener cung luc) ---
+
+def _stop_all(base):
+    _post(base, "/api/live/stop")
+    _post(base, "/api/listener/stop")
+
+
+def test_start_all_both_stopped(base, monkeypatch):
+    """Ca hai deu dung -> start-all khoi dong ca hai, ok=true."""
+    spawned = []
+
+    def _fake_spawn(argv):
+        spawned.append(argv)
+        return FakeProc()
+
+    monkeypatch.setattr(webapi, "_spawn_proc", _fake_spawn)
+    _stop_all(base)
+    try:
+        status, body = _post(base, "/api/start-all")
+        assert status == 200
+        assert set(body) == {"live", "listener"}
+        assert body["live"]["ok"] is True
+        assert body["listener"]["ok"] is True
+        assert body["live"]["reason"] and body["listener"]["reason"]
+        assert len(spawned) == 2
+        assert any("--recommend-only" in a for a in spawned)
+        assert any("telegram-listen" in a for a in spawned)
+        status, body = _get(base, "/api/live")
+        assert body["running"] is True
+        status, body = _get(base, "/api/listener")
+        assert body["running"] is True
+    finally:
+        _stop_all(base)
+
+
+def test_start_all_one_already_running(base, monkeypatch):
+    """Live da chay -> live ok:true (khong phai loi), listener van
+    khoi dong; Live khong bi khoi dong lai."""
+    spawned = []
+
+    def _fake_spawn(argv):
+        spawned.append(argv)
+        return FakeProc()
+
+    monkeypatch.setattr(webapi, "_spawn_proc", _fake_spawn)
+    _stop_all(base)
+    try:
+        status, body = _post(base, "/api/live/start",
+                             {"mode": "recommend", "desk": "forex"})
+        assert status == 200 and body["ok"] is True
+        spawned.clear()
+        status, body = _post(base, "/api/start-all")
+        assert status == 200
+        assert body["live"]["ok"] is True  # da chay: idempotent
+        assert body["listener"]["ok"] is True
+        assert body["live"]["reason"] and body["listener"]["reason"]
+        assert len(spawned) == 1
+        assert "telegram-listen" in spawned[0]
+    finally:
+        _stop_all(base)
+
+
+def test_start_all_one_fails_other_still_attempted(base, monkeypatch):
+    """Listener loi spawn -> live van khoi dong, ca hai ket qua deu
+    duoc tra ve (overall 200, khong phai loi HTTP)."""
+    spawned = []
+
+    def _fake_spawn(argv):
+        spawned.append(argv)
+        if "telegram-listen" in argv:
+            raise RuntimeError("khong tim thay telegram-listen")
+        return FakeProc()
+
+    monkeypatch.setattr(webapi, "_spawn_proc", _fake_spawn)
+    _stop_all(base)
+    try:
+        status, body = _post(base, "/api/start-all")
+        assert status == 200
+        assert body["live"]["ok"] is True
+        assert body["listener"]["ok"] is False
+        assert body["listener"]["reason"]
+        assert any("live" in a for a in spawned)
+        assert any("telegram-listen" in a for a in spawned)
+    finally:
+        _stop_all(base)
+
+
+def test_start_all_requires_auth(base):
+    """Chua dang nhap -> 401 (cung bao ve OTP nhu cac /api/* khac)."""
+    status, _ = _post(base, "/api/start-all", headers={})
+    assert status == 401
+
+
+def test_start_all_reasons_translated_both_languages(base, monkeypatch):
+    """Start-all tra ly do dich theo ngon ngu config (quy tac 57):
+    EN luc khoi dong moi, VI (co dau) luc goi lai khi da chay."""
+    spawned = []
+
+    def _fake_spawn(argv):
+        spawned.append(argv)
+        return FakeProc()
+
+    monkeypatch.setattr(webapi, "_spawn_proc", _fake_spawn)
+    _stop_all(base)
+    try:
+        monkeypatch.setattr(webapi, "_load_cfg", lambda: {
+            "language": "en",
+            "telegram": {"enabled": True, "chat_id": "1234567890"},
+            "mt5": {"demo_only": True}})
+        status, body = _post(base, "/api/start-all")
+        assert status == 200
+        assert body["live"] == {"ok": True, "reason": "Live started"}
+        assert body["listener"] == {
+            "ok": True, "reason": "Telegram listener started"}
+        assert len(spawned) == 2
+        # Goilai khi ca hai da chay: idempotent, ok:true, ly do VI co dau.
+        monkeypatch.setattr(webapi, "_load_cfg", lambda: {
+            "language": "vi",
+            "telegram": {"enabled": True, "chat_id": "1234567890"},
+            "mt5": {"demo_only": True}})
+        status, body = _post(base, "/api/start-all")
+        assert status == 200
+        assert body["live"] == {"ok": True, "reason": "Live đang chạy"}
+        assert body["listener"] == {
+            "ok": True, "reason": "Telegram listener đang chạy"}
+        assert len(spawned) == 2  # khong spawn lai tien trinh nao
+    finally:
+        _stop_all(base)
+
+
 # --- Frontend tinh: GET / ---
 
 def test_root_serves_built_index(base):

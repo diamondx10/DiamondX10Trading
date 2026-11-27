@@ -166,7 +166,7 @@ def test_manager_start_twice_refuses_second():
     ok, reason, managed = manager.start("listener", ["fake"])
     assert ok is False
     assert managed is None
-    assert "da chay" in reason
+    assert "đang chạy" in reason
     # Dung roi thi khoi dong lai duoc.
     assert manager.stop("listener") is True
     ok, _r, _m = manager.start("listener", ["fake"])
@@ -181,7 +181,41 @@ def test_manager_spawn_failure_reports_reason():
     ok, reason, managed = manager.start("live", ["khong-co"])
     assert ok is False
     assert managed is None
-    assert "khong khoi dong duoc live" in reason
+    assert "Không khởi động được Live" in reason
+
+
+def test_manager_start_reasons_translated():
+    """Ly do cua ProcessManager.start dich theo lang: mac dinh "vi"
+    (co dau day du), lang="en" thi tieng Anh; ten noi bo khong lo."""
+    manager = ProcessManager(popen_factory=lambda argv, **kw: FakePopen())
+    ok, reason, _m = manager.start("listener", ["fake"])
+    assert ok is True
+    assert reason == "Đã khởi động Telegram listener"
+    # Da chay thi tu choi (ca 2 ngon ngu).
+    ok, reason, managed = manager.start("listener", ["fake"])
+    assert ok is False and managed is None
+    assert reason == "Telegram listener đang chạy"
+    assert manager.stop("listener") is True
+    # Tieng Anh: khong con manh tieng Viet khong dau nao.
+    ok, reason, _m = manager.start("listener", ["fake"], lang="en")
+    assert ok is True
+    assert reason == "Telegram listener started"
+    ok, reason, managed = manager.start("listener", ["fake"], lang="en")
+    assert ok is False and managed is None
+    assert reason == "Telegram listener is already running"
+    assert manager.stop("listener") is True
+    # Spawn loi, tieng Anh, chi tiet loi giu nguyen dang goc.
+    def _boom_en(argv, **kwargs):
+        raise FileNotFoundError("khong co file chay")
+
+    manager_en = ProcessManager(popen_factory=_boom_en)
+    ok, reason, managed = manager_en.start("live", ["khong-co"],
+                                           lang="en")
+    assert ok is False and managed is None
+    assert reason == "Could not start Live: khong co file chay"
+    for fragment in ("da khoi dong", "da chay", "khong khoi dong",
+                     "thoat ngay"):
+        assert fragment not in reason
 
 
 def test_manager_start_passes_pipes_and_lines():

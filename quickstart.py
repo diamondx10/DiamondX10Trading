@@ -24,7 +24,8 @@ Thu tu chay (co y): CHUAN BI XONG moi hoi thong tin dang nhap.
      tai khoan that), kiem tra symbol.
   6. Dry-run tin hieu cho 4 desk (Forex / XAUUSD / Crypto /
      US securities). Mac dinh KHONG dat lenh.
-  7. Cai dat Telegram (hoi token bot + chat_id, ghi config local)
+  7. Cai dat Telegram (hoi token bot + chat_id, ghi config local;
+     token nhap tay duoc luu vinh vien bang setx tren Windows)
      roi chay bo kiem tra test_run.py (chi kiem tra, KHONG dat
      lenh; log ghi ra logs/test-run-*.log). Co buoc LOI thi hoi co
      tiep tuc khong — khong tiep tuc thi dung lai truoc khi dat
@@ -224,11 +225,36 @@ def _ask_password(prompt="Mat khau demo MT5 (nhap an, khong luu vao file)"):
 
 
 def _ask_secret(prompt):
-    """Nhap token an (Enter de bo qua); chi giu trong bo nho."""
+    """Nhap token an (Enter de bo qua)."""
     try:
         return getpass.getpass(f"{prompt}: ")
     except Exception:
         return _ask(prompt)
+
+
+def _persist_token_env(token, existing=""):
+    """Luu token bot vao bien moi truong user tren Windows (setx).
+
+    Chi chay tren Windows, chi khi user vua nhap token moi (khac gia tri
+    da co trong bien moi truong). Khong bao gio in token ra man hinh/log.
+    Tra True neu setx bao thanh cong.
+    """
+    if not token or token == existing or sys.platform != "win32":
+        return False
+    try:
+        proc = subprocess.run(
+            ["setx", "DIAMONDX10_TELEGRAM_TOKEN", token],
+            capture_output=True, text=True, timeout=30)
+        ok = proc.returncode == 0
+    except Exception:
+        ok = False
+    if ok:
+        print("  OK: da luu token bot vao bien moi truong (setx) — "
+              "cac lan chay sau khong can nhap lai (mo cua so moi).")
+    else:
+        print("  ! Khong luu duoc token vao bien moi truong — van dung "
+              "duoc trong lan chay nay; dat tay bang setx neu can.")
+    return ok
 
 
 def _read_existing_config():
@@ -594,10 +620,13 @@ def main(argv=None):
 
     # --- 7. Telegram + chay bo test -------------------------------------
     print("[7/8] Cai dat Telegram + chay bo kiem tra (test_run.py)")
+    old_token = os.environ.get("DIAMONDX10_TELEGRAM_TOKEN", "")
     token = _ask_secret("Telegram bot token de nhan khuyen nghi mua/ban "
-                        "(Enter de bo qua, token chi giu trong bo nho)")
+                        "(Enter de bo qua; tren Windows token nhap tay se "
+                        "duoc luu vinh vien bang setx)")
     if token:
         os.environ["DIAMONDX10_TELEGRAM_TOKEN"] = token
+        _persist_token_env(token, old_token)
     chat_id = _ask("Chat ID Telegram nhan khuyen nghi mua/ban "
                    "(Enter de bo qua)",
                    old_tg_chat_id or None)

@@ -15,7 +15,9 @@ BAO MAT — chi local + dang nhap OTP qua Telegram (xem webauth.py):
     (chan path traversal).
 
 Quy tac chung:
-  - Chuoi hien thi tieng Viet KHONG dau trong code, log va JSON.
+  - Chuoi hien thi tieng Viet KHONG dau trong code, log va JSON —
+    TRU ly do tra ve cho tab Manager cua WebUI (dich theo ngon ngu
+    config qua i18n, tieng Viet co dau day du — xem _start_proc).
   - Moi endpoint that bai sach (JSON error, khong traceback) khi
     thieu file state hay khong co MT5; MT5 tren Linux luon bao
     mt5_ok=false chu khong raise.
@@ -56,7 +58,7 @@ except ImportError as exc:  # noqa: BLE001 — chay thieu fastapi thi bao ro
     _FASTAPI_ERROR = exc
 
 from . import killswitch, telegram
-from .i18n import t as _i18n_t
+from .i18n import proc_display_name, t as _i18n_t
 from .webauth import (
     OTP_TTL_SECONDS,
     SESSION_COOKIE_NAME,
@@ -459,27 +461,39 @@ def _spawn_proc(argv):
         text=True, bufsize=1)
 
 
-def _start_proc(name, argv, mode):
-    """Khoi dong tien trinh (neu chua chay). Tra (ok, reason)."""
+def _start_proc(name, argv, mode, lang=None):
+    """Khoi dong tien trinh (neu chua chay). Tra (ok, reason).
+
+    Ly do (reason) duoc dich theo ngon ngu cua config (mac dinh "vi",
+    tieng Viet co dau day du): `lang` truyen vao thang neu co, khong
+    thi doc config nhu cac endpoint khac. Ten tien trinh hien thi
+    cung duoc dich qua i18n.proc_display_name (khong de lo ten noi
+    bo "live" / "listener" / "diagnostics" ra UI); chi tiet ky thuat
+    (exception, ma thoat) giu nguyen dang goc.
+    """
+    if lang is None:
+        lang = _resolve_language(_load_cfg())
+    display = proc_display_name(name, lang)
     entry = _PROCS.get(name)
     if entry is not None and entry["proc"].poll() is None:
-        return False, f"{name} da chay"
+        return False, _i18n_t("mgr.proc_running", lang, proc=display)
     try:
         proc = _spawn_proc(argv)
     except Exception as exc:  # noqa: BLE001 — khong chay duoc thi bao ro
-        return False, f"khong khoi dong duoc {name}: {exc}"
+        return False, _i18n_t("mgr.proc_start_failed", lang,
+                              proc=display, detail=exc)
     started = datetime.now(timezone.utc).isoformat()
     _PROCS[name] = {"proc": proc, "started": started, "mode": mode}
-    # Dang ky vao manager TRUOC khi doi 0.3s de bat ca log thoat ngay.
+    # Dang ky vao manager TRUOC khi doi 0.3s de bat ca log thoat som.
     try:
         _MANAGER.register(name, proc, started_utc=started)
     except Exception:  # noqa: BLE001 — bat log loi thi van chay tien trinh
         pass
     time.sleep(0.3)
     if proc.poll() is not None:
-        return False, (f"{name} thoat ngay (ma {proc.returncode}) — "
-                       "kiem tra config / MT5 / log")
-    return True, f"da khoi dong {name}"
+        return False, _i18n_t("mgr.proc_exited", lang, proc=display,
+                              code=proc.returncode)
+    return True, _i18n_t("mgr.proc_started", lang, proc=display)
 
 
 def _stop_proc(name):
@@ -842,7 +856,9 @@ def create_app(static_dir=None):
         on = payload.get("on")
         if not isinstance(on, bool):
             raise HTTPException(
-                status_code=400, detail="truong 'on' phai la true/false")
+                status_code=400,
+                detail=_i18n_t("mgr.kill_switch_bad_field",
+                               _resolve_language(_load_cfg())))
         if on:
             killswitch.engage("webui", by="webui")
         else:
@@ -1199,14 +1215,15 @@ def create_app(static_dir=None):
     def api_live_start(payload: dict):
         mode = payload.get("mode") or "recommend"
         desk = payload.get("desk") or "forex"
+        lang = _resolve_language(_load_cfg())
         if mode not in ("recommend", "auto"):
             return {"ok": False,
-                    "reason": "mode khong hop le (chon recommend | auto)"}
+                    "reason": _i18n_t("mgr.live_bad_mode", lang)}
         argv = [sys.executable, "-m", "diamondx10", "live",
                 "--desk", desk]
         if mode == "recommend":
             argv.append("--recommend-only")
-        ok, reason = _start_proc("live", argv, mode)
+        ok, reason = _start_proc("live", argv, mode, lang=lang)
         return {"ok": ok, "reason": reason}
 
     @app.post("/api/live/stop")
@@ -1230,6 +1247,30 @@ def create_app(static_dir=None):
         _stop_proc("listener")
         return {"ok": True}
 
+    @app.post("/api/start-all")
+    def api_start_all():
+        """Khoi dong ca Live (che do recommend) va Telegram listener.
+
+        Moi thanh phan khoi dong doc lap qua cung helper _start_proc
+        nhu nut rieng: 1 cai loi thi cai kia van thu, ca hai ket qua
+        deu duoc tra ve. Thanh phan da chay thi ok:true (khong phai
+        loi) — ly do (reason) lay nguyen tu helper.
+        """
+        live_argv = [sys.executable, "-m", "diamondx10", "live",
+                     "--desk", "forex", "--recommend-only"]
+        live_ok, live_reason = _start_proc("live", live_argv, "recommend")
+        if not live_ok and _proc_status("live")["running"]:
+            live_ok = True  # da chay: idempotent, khong phai loi
+        listener_argv = [sys.executable, "-m", "diamondx10",
+                         "telegram-listen"]
+        listener_ok, listener_reason = _start_proc(
+            "listener", listener_argv, "listen")
+        if not listener_ok and _proc_status("listener")["running"]:
+            listener_ok = True  # da chay: idempotent, khong phai loi
+        return {"live": {"ok": live_ok, "reason": live_reason},
+                "listener": {"ok": listener_ok,
+                             "reason": listener_reason}}
+
     # --- Manager console: log tien trinh / diagnostics / telegram-test ---
 
     @app.get("/api/logs")
@@ -1243,8 +1284,9 @@ def create_app(static_dir=None):
         if process not in MANAGED_PROCESSES:
             raise HTTPException(
                 status_code=400,
-                detail=f"process khong hop le: {process!r} "
-                       "(chon live | listener | diagnostics)")
+                detail=_i18n_t(
+                    "mgr.logs_bad_process",
+                    _resolve_language(_load_cfg()), process=process))
         return _proc_lines(process, after=after)
 
     @app.post("/api/diagnostics")
@@ -1265,19 +1307,31 @@ def create_app(static_dir=None):
         from .__main__ import cmd_telegram_test
 
         cfg = _load_cfg()
+        lang = _resolve_language(cfg)
         status = telegram.setup_status(cfg)
         if not status.get("ready"):
-            missing = "; ".join(status.get("missing")
-                                or ["chua san sang"])
+            # Dich tung muc thieu theo co (enabled / token / chat_id)
+            # thay vi dung lai chuoi khong dau cua setup_status (chuoi
+            # do phuc vu CLI, giu nguyen).
+            missing = []
+            if not status.get("enabled"):
+                missing.append(_i18n_t("mgr.tg_missing_enabled", lang))
+            if not status.get("has_token"):
+                missing.append(_i18n_t("mgr.tg_missing_token", lang))
+            if not status.get("has_chat_id"):
+                missing.append(_i18n_t("mgr.tg_missing_chat_id", lang))
+            if not missing:
+                missing = [str(m) for m in
+                           (status.get("missing") or ["?"])]
             return {"ok": False,
-                    "reason": f"Telegram chua san sang — thieu: {missing}"}
+                    "reason": _i18n_t("mgr.telegram_not_ready", lang,
+                                      missing="; ".join(missing))}
         rc = cmd_telegram_test(cfg)
         if rc == 0:
             return {"ok": True,
-                    "reason": "da gui tin nhan thu len Telegram"}
+                    "reason": _i18n_t("mgr.telegram_test_sent", lang)}
         return {"ok": False,
-                "reason": "khong gui duoc tin thu — kiem tra token / "
-                          "chat_id va mang"}
+                "reason": _i18n_t("mgr.telegram_test_failed", lang)}
 
     # Static assets cua build React (/assets/*) — mount SAU cac route
     # /api/* de API luon thang.

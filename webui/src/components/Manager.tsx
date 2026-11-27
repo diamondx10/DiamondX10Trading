@@ -4,9 +4,10 @@
 // switch. Each button reports the backend's result reason.
 import { useState } from 'react'
 import {
-  apiGet, fmtUsd, getListener, getLive, runDiagnostics, startListener,
-  startLive, stopListener, stopLive, telegramTest, toggleKillSwitch,
-  type ActionResult, type LiveState, type ListenerState, type Status,
+  apiGet, fmtUsd, getListener, getLive, runDiagnostics, startAll,
+  startListener, startLive, stopListener, stopLive, telegramTest,
+  toggleKillSwitch, type ActionResult, type LiveState,
+  type ListenerState, type Status,
 } from '../api'
 import { useI18n } from '../i18n'
 import LogViewer from './LogViewer'
@@ -87,6 +88,12 @@ export default function Manager() {
       <div className="card">
         <h2>{t('mgr.controls')}</h2>
         <p className="muted small">{t('mgr.modeRecommend')}</p>
+        <div style={{ marginBottom: 12 }}>
+          <button className="btn" disabled={busy !== '' || (s.live_running && s.listener_running)} onClick={() => act(t('mgr.startAll'), async () => {
+            const r = await startAll()
+            return { ok: r.live.ok && r.listener.ok, reason: `${t('mgr.live')}: ${r.live.reason} · ${t('mgr.listener')}: ${r.listener.reason}` }
+          })}>{t('mgr.startAll')}</button>
+        </div>
         <div className="btn-row">
           <button className="btn" disabled={busy !== '' || s.live_running} onClick={() => act(t('mgr.startLive'), async () => {
             const r = await startLive('recommend', 'forex')

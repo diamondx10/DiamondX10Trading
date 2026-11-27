@@ -81,6 +81,30 @@ STRINGS = {
             "💎 DiamondX10 — Mã đăng nhập của bạn: {code}\n"
             "Mã có hiệu lực trong {seconds} giây. "
             "Không chia sẻ mã này với bất kỳ ai."),
+        # --- WebUI: Manager console (ly do tra ve cho tab Quan ly) ---
+        # Ten hien thi cua tien trinh (khong de lo ten noi bo).
+        "mgr.proc_live": "Live",
+        "mgr.proc_listener": "Telegram listener",
+        "mgr.proc_diagnostics": "Kiểm tra hệ thống",
+        "mgr.proc_running": "{proc} đang chạy",
+        "mgr.proc_start_failed": "Không khởi động được {proc}: {detail}",
+        "mgr.proc_exited": (
+            "{proc} thoát ngay (mã {code}) — kiểm tra config / MT5 / log"),
+        "mgr.proc_started": "Đã khởi động {proc}",
+        "mgr.live_bad_mode": "Chế độ không hợp lệ (chọn recommend | auto)",
+        "mgr.logs_bad_process": (
+            "Tên tiến trình không hợp lệ: {process} "
+            "(chọn live | listener | diagnostics)"),
+        "mgr.kill_switch_bad_field": "Trường 'on' phải là true/false",
+        "mgr.telegram_not_ready": "Telegram chưa sẵn sàng — thiếu: {missing}",
+        "mgr.telegram_test_sent": "Đã gửi tin nhắn thử lên Telegram",
+        "mgr.telegram_test_failed": (
+            "Không gửi được tin thử — kiểm tra token / chat_id và mạng"),
+        "mgr.tg_missing_enabled": "telegram.enabled chưa bật (config.yaml)",
+        "mgr.tg_missing_token": (
+            "token bot (biến môi trường DIAMONDX10_TELEGRAM_TOKEN)"),
+        "mgr.tg_missing_chat_id": (
+            "chat_id (mục telegram.chat_id trong config.yaml)"),
         # --- Briefing PTCB: template .md ---
         "briefing.title": "# BRIEFING PHAN TICH — DESK {desk}",
         "briefing.greeting": "Chao {analyst},",
@@ -191,6 +215,33 @@ STRINGS = {
             "💎 DiamondX10 — Your sign-in code: {code}\n"
             "This code is valid for {seconds} seconds. "
             "Never share this code with anyone."),
+        # --- WebUI: Manager console (reasons returned to the Manager tab) ---
+        # Display names for managed processes (internal names never leak).
+        "mgr.proc_live": "Live",
+        "mgr.proc_listener": "Telegram listener",
+        "mgr.proc_diagnostics": "System check",
+        "mgr.proc_running": "{proc} is already running",
+        "mgr.proc_start_failed": "Could not start {proc}: {detail}",
+        "mgr.proc_exited": (
+            "{proc} exited immediately (code {code}) — "
+            "check config / MT5 / log"),
+        "mgr.proc_started": "{proc} started",
+        "mgr.live_bad_mode": "Invalid mode (choose recommend | auto)",
+        "mgr.logs_bad_process": (
+            "Invalid process name: {process} "
+            "(choose live | listener | diagnostics)"),
+        "mgr.kill_switch_bad_field": "Field 'on' must be true/false",
+        "mgr.telegram_not_ready": "Telegram is not ready — missing: {missing}",
+        "mgr.telegram_test_sent": "Test message sent to Telegram",
+        "mgr.telegram_test_failed": (
+            "Could not send the test message — "
+            "check the token / chat_id and network"),
+        "mgr.tg_missing_enabled": (
+            "telegram.enabled is not turned on (config.yaml)"),
+        "mgr.tg_missing_token": (
+            "bot token (environment variable DIAMONDX10_TELEGRAM_TOKEN)"),
+        "mgr.tg_missing_chat_id": (
+            "chat_id (telegram.chat_id in config.yaml)"),
         # --- Briefing: .md template ---
         "briefing.title": "# ANALYSIS BRIEFING — DESK {desk}",
         "briefing.greeting": "Hello {analyst},",
@@ -283,3 +334,20 @@ def t(key, lang="vi", **kwargs):
         except (KeyError, IndexError, ValueError):
             return template
     return template
+
+
+# Ten hien thi cua tien trinh duoc quan ly (live / listener /
+# diagnostics) theo ngon ngu — ten noi bo KHONG bao gio lo ra UI.
+PROC_DISPLAY_KEYS = {
+    "live": "mgr.proc_live",
+    "listener": "mgr.proc_listener",
+    "diagnostics": "mgr.proc_diagnostics",
+}
+
+
+def proc_display_name(name, lang="vi"):
+    """Ten hien thi cua tien trinh `name`; ten la tra nguyen."""
+    key = PROC_DISPLAY_KEYS.get(name)
+    if key is None:
+        return name
+    return t(key, lang)

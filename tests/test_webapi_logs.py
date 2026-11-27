@@ -370,7 +370,7 @@ def test_diagnostics_start_safe_mode_and_logs(base, monkeypatch):
         status, body = _post(base, "/api/diagnostics")
         assert status == 200
         assert body["ok"] is False
-        assert "da chay" in body["reason"]
+        assert "đang chạy" in body["reason"]
     finally:
         _stop_diag = webapi._stop_proc("diagnostics")
         assert _stop_diag is True
@@ -408,7 +408,7 @@ def test_telegram_test_not_ready(base, monkeypatch):
     status, body = _post(base, "/api/telegram-test")
     assert status == 200
     assert body["ok"] is False
-    assert "thieu" in body["reason"]
+    assert "thiếu" in body["reason"]
     assert sent == []  # chua san sang thi khong gui
 
 

@@ -150,6 +150,10 @@ export async function getLive(): Promise<LiveState> {
 export async function startListener(): Promise<ActionResult> {
   return apiPost<ActionResult>('/api/listener/start')
 }
+export interface StartAllResult { live: ActionResult; listener: ActionResult }
+export async function startAll(): Promise<StartAllResult> {
+  return apiPost<StartAllResult>('/api/start-all')
+}
 export async function stopListener(): Promise<ActionResult> {
   return apiPost<ActionResult>('/api/listener/stop')
 }

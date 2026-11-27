@@ -119,6 +119,7 @@ Goc: `http://127.0.0.1:8000`. Tat ca tra JSON. Tru 3 route
 | GET | `/api/listener` | Trang thai telegram-listen |
 | POST | `/api/listener/start` | Bat telegram-listen |
 | POST | `/api/listener/stop` | Tat telegram-listen |
+| POST | `/api/start-all` | Bat ca Live (che do recommend) + telegram-listen trong 1 lan goi; tra `{"live": {"ok","reason"}, "listener": {"ok","reason"}}` — moi thanh phan khoi dong doc lap, 1 cai loi thi cai kia van thu; thanh phan da chay thi `ok: true` (khong phai loi) (xem muc 9) |
 | GET | `/api/language` | Ngon ngu giao dien hien tai (`vi` \| `en`) |
 | POST | `/api/language` | Doi ngon ngu (`{"language": "vi" \| "en"}`) |
 | GET | `/api/team-news` | Tin doi da phan tich trang chu (xem muc 7) |
@@ -329,7 +330,7 @@ MIT**). Chi lay y tuong bo cuc; **khong copy code, khong them
 dependency** — feed dx10 viet bang React + token thiet ke Apple-style
 san co cua dx10, khong dung Next.js/Tailwind cua Kinfolk.
 
-## 9. Dang nhap OTP + tab Quan ly + xem log terminal (quy tac 55–56)
+## 9. Dang nhap OTP + tab Quan ly + xem log terminal (quy tac 55–57)
 
 **Dang nhap (quy tac 55).** Mo web UI len thi gap man hinh dang
 nhap truoc, khong vao thang giao dien. Bam "Gui ma OTP qua
@@ -359,6 +360,29 @@ Telegram listener**, **Chay kiem tra he thong** (`POST
 lenh), **Gui tin Telegram thu** (`POST /api/telegram-test`),
 **bat/tat kill switch**. Moi nut hien lai ly do (`reason`) tra ve
 tu backend.
+
+**Nut Khoi dong tat ca — START ALL (quy tac 57).** Dau tab Quan
+ly, muc Dieu khien co nut **Khoi dong tat ca (Live + Listener)**
+(`POST /api/start-all`): 1 lan bam khoi dong ca vong Live (che do
+recommend, desk forex) va Telegram listener qua dung helper nhu
+nut rieng. Moi thanh phan khoi dong doc lap — 1 cai loi thi cai
+kia van duoc thu, ca hai ket qua deu tra ve dang
+`{"live": {"ok","reason"}, "listener": {"ok","reason"}}`; giao
+dien hien ca hai ly do (`Live: ... · Listener: ...`). Goi lai
+khi da chay la **idempotent**: thanh phan da chay tra `ok: true`
+(ly do "dang chay"), khong khoi dong lai, van tra 200. Nut tu
+vo hieu hoa khi ca hai deu dang chay.
+
+**Ly do Manager dich theo ngon ngu (quy tac 57).** Moi ly do
+(`reason`) tra ve cho tab Quan ly — khoi dong / da chay / loi
+spawn / thoat ngay, che do live sai, log sai ten tien trinh,
+kill switch sai truong, telegram-test — deu duoc dich theo ngon
+ngu dang chon (VI | EN, theo `language:` trong config, mac dinh
+`vi`): tieng Viet co dau day du ("Đã khởi động Live",
+"Live đang chạy"), tieng Anh dich het, khong con manh tieng Viet
+khong dau nao trong ban tieng Anh. Ten tien trinh hien thi cung
+duoc dich (Live / Telegram listener / Kiem tra he thong); chi
+tiet ky thuat (exception, ma thoat) giu nguyen dang goc.
 
 **Xem log terminal (quy tac 56).** Trong tab Quan ly co khung
 terminal: chon tien trinh (Live / Telegram / Kiem tra he thong),

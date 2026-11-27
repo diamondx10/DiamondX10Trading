@@ -158,6 +158,60 @@ def test_quickstart_bat_bootstraps_python():
     assert "%*" in bat
     assert "(3, 10)" in bat
     assert "InstallAllUsers=0" in bat
+    # Luu PYTHONPATH vinh vien de lenh "python -m diamondx10 ..." chay
+    # duoc o bat ky cua so moi nao ma khong can go $env:PYTHONPATH nua.
+    assert "setx PYTHONPATH" in bat
+    assert 'set "PYTHONPATH=' in bat
+
+
+class _FakeSetxProc:
+    def __init__(self, returncode=0):
+        self.returncode = returncode
+
+
+def test_persist_token_env_calls_setx_on_windows(monkeypatch, capsys):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return _FakeSetxProc(0)
+
+    monkeypatch.setattr(qs.sys, "platform", "win32")
+    monkeypatch.setattr(qs.subprocess, "run", fake_run)
+    assert qs._persist_token_env("FAKE-TOKEN-xyz-123", "") is True
+    assert calls == [["setx", "DIAMONDX10_TELEGRAM_TOKEN",
+                      "FAKE-TOKEN-xyz-123"]]
+    out = capsys.readouterr().out
+    assert "FAKE-TOKEN-xyz-123" not in out
+    assert "da luu token" in out
+
+
+def test_persist_token_env_skips(monkeypatch):
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return _FakeSetxProc(0)
+
+    monkeypatch.setattr(qs.sys, "platform", "win32")
+    monkeypatch.setattr(qs.subprocess, "run", fake_run)
+    assert qs._persist_token_env("", "") is False
+    assert qs._persist_token_env("FAKE-TOKEN-xyz-123",
+                                 "FAKE-TOKEN-xyz-123") is False
+    assert calls == []
+    monkeypatch.setattr(qs.sys, "platform", "linux")
+    assert qs._persist_token_env("FAKE-TOKEN-xyz-123", "") is False
+    assert calls == []
+
+
+def test_persist_token_env_reports_failure_without_token(monkeypatch, capsys):
+    monkeypatch.setattr(qs.sys, "platform", "win32")
+    monkeypatch.setattr(qs.subprocess, "run",
+                        lambda argv, **kw: _FakeSetxProc(1))
+    assert qs._persist_token_env("FAKE-TOKEN-xyz-123", "") is False
+    out = capsys.readouterr().out
+    assert "FAKE-TOKEN-xyz-123" not in out
+    assert "Khong luu duoc" in out
 
 # --- Telegram: giu lai cai dat + cap nhat muc telegram --------------------
 def test_apply_telegram_to_config_text_replaces_block():

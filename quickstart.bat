@@ -19,6 +19,18 @@ REM ==========================================================================
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
+REM --- Luu PYTHONPATH vinh vien (setx) de lenh "python -m diamondx10 ..."
+REM chay duoc o bat ky cua so moi nao ma khong can go $env:PYTHONPATH nua.
+REM "set" chi co tac dung trong phien bat nay; "setx" ghi vao registry
+REM (chi ap dung cho cua so mo SAU khi chay file nay).
+set "PYTHONPATH=%~dp0src"
+setx PYTHONPATH "%~dp0src" >nul 2>nul
+if %errorlevel%==0 (
+  echo [quickstart.bat] Da luu PYTHONPATH (setx) cho cac lan chay sau.
+) else (
+  echo [quickstart.bat] Khong luu duoc PYTHONPATH (setx) — van chay duoc trong lan nay.
+)
+
 set "PY="
 set "PY_VERSION=3.12.10"
 set "PY_INSTALLER_URL=https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"

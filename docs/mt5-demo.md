@@ -28,6 +28,12 @@ roi chay `quickstart.py`. Neu may da co Python thi chay thang:
 python quickstart.py
 ```
 
+`quickstart.bat` con luu vinh vien `PYTHONPATH` (setx) de lenh
+`python -m diamondx10 ...` chay duoc o bat ky cua so moi nao ma khong
+can go `$env:PYTHONPATH` nua; buoc 7 luu token bot vua nhap vao bien
+moi truong (setx) tren Windows — cac lan chay sau khong can nhap lai
+(mo cua so moi de bien co hieu luc).
+
 Script chay theo thu tu: **chuan bi xong moi hoi dang nhap**.
 0. Kiem tra Python >= 3.10. 1. Tu dong cai `requirements.txt` +
 `MetaTrader5` (cai loi thi dung ngay). 2. **Tu dong quet tim MT5

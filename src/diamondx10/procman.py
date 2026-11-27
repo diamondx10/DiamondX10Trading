@@ -13,6 +13,8 @@ import threading
 from collections import deque
 from datetime import datetime, timezone
 
+from .i18n import normalize_language, proc_display_name, t
+
 MAX_LINES = 500
 
 MANAGED_PROCESSES = ("live", "listener", "diagnostics")
@@ -134,27 +136,34 @@ class ProcessManager:
         self._procs = {}
         self._lock = threading.Lock()
 
-    def start(self, name, argv, cwd=None, env=None):
+    def start(self, name, argv, cwd=None, env=None, lang=None):
         """Khoi dong tien trinh `name` (neu chua chay).
 
-        Tra (ok, reason, managed_or_None). Tien trinh da chay thi
-        (False, "<name> da chay", None). Spawn loi thi (False, ly do,
-        None). Khong kiem tra thoat ngay o day — webapi._start_proc
-        giu buoc kiem tra do nhu cu.
+        Tra (ok, reason, managed_or_None). Ly do (reason) duoc dich
+        theo `lang` ("vi" | "en", mac dinh "vi" — tieng Viet co dau
+        day du); ten tien trinh hien thi cung duoc dich qua
+        i18n.proc_display_name. Chi tiet ky thuat (exception) giu
+        nguyen dang goc. Khong kiem tra thoat som o day —
+        webapi._start_proc giu buoc kiem tra do nhu cu.
         """
+        lang = normalize_language(lang)
+        display = proc_display_name(name, lang)
         with self._lock:
             existing = self._procs.get(name)
             if existing is not None and existing.running:
-                return False, f"{name} da chay", None
+                return False, t("mgr.proc_running", lang,
+                                proc=display), None
             try:
                 proc = self._popen(
                     argv, cwd=cwd, env=env, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, bufsize=1)
             except Exception as exc:  # noqa: BLE001 — spawn loi thi bao ro
-                return False, f"khong khoi dong duoc {name}: {exc}", None
+                return False, t("mgr.proc_start_failed", lang,
+                                proc=display, detail=exc), None
             managed = ManagedProcess(name, proc)
             self._procs[name] = managed
-            return True, f"da khoi dong {name}", managed
+            return True, t("mgr.proc_started", lang,
+                           proc=display), managed
 
     def register(self, name, proc, started_utc=None):
         """Dang ky 1 Popen da spawn san (vd _spawn_proc cua webapi).

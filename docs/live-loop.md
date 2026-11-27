@@ -128,7 +128,9 @@ CLI ghi đè config: `--timeframe`, `--interval-min`, `--max-cycles`,
    (Đóng terminal mở lại để biến có hiệu lực.) Điền `chat_id` vào
    `config.yaml` local, bật `telegram.enabled: true`. Chạy
    `python quickstart.py --live` cũng hỏi token + chat_id và tự ghi
-   `telegram.enabled: true` + `chat_id` vào `config.yaml` local.
+   `telegram.enabled: true` + `chat_id` vào `config.yaml` local; bước 7
+   của quickstart còn lưu token vừa nhập vào biến môi trường (setx)
+   trên Windows nên các lần chạy sau không cần nhập lại.
 5. Kiểm tra kết nối ngay bằng lệnh thử (không cần đợi tín hiệu thật):
 
    ```bash

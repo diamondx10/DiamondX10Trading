@@ -105,6 +105,45 @@ def test_t_falls_back_to_key_for_unknown_key():
     assert t("khong.co.khoa.nay", "en") == "khong.co.khoa.nay"
 
 
+# --- (a2) Ten hien thi tien trinh Manager ------------------------------
+
+def test_proc_display_name_translated():
+    from diamondx10.i18n import proc_display_name
+
+    assert proc_display_name("live", "vi") == "Live"
+    assert proc_display_name("live", "en") == "Live"
+    assert proc_display_name("listener", "vi") == "Telegram listener"
+    assert proc_display_name("listener", "en") == "Telegram listener"
+    assert proc_display_name("diagnostics", "vi") == "Kiểm tra hệ thống"
+    assert proc_display_name("diagnostics", "en") == "System check"
+    # Ten la: tra nguyen, khong dich, khong raise.
+    assert proc_display_name("chua-biet", "vi") == "chua-biet"
+    assert proc_display_name("chua-biet", "en") == "chua-biet"
+
+
+def test_manager_reason_keys_translated():
+    """Cac khoa ly do Manager: vi co dau day du, en dich het, khong
+    con manh tieng Viet khong dau nao trong ban en."""
+    assert t("mgr.proc_started", "vi", proc="Live") == "Đã khởi động Live"
+    assert t("mgr.proc_started", "en", proc="Live") == "Live started"
+    assert t("mgr.proc_running", "vi", proc="Live") == "Live đang chạy"
+    assert t("mgr.proc_running", "en",
+             proc="Live") == "Live is already running"
+    assert t("mgr.proc_exited", "en", proc="Live",
+             code=1) == ("Live exited immediately (code 1) — "
+                         "check config / MT5 / log")
+    assert t("mgr.telegram_test_sent", "vi") == (
+        "Đã gửi tin nhắn thử lên Telegram")
+    assert t("mgr.telegram_test_sent", "en") == (
+        "Test message sent to Telegram")
+    for key, value in STRINGS["en"].items():
+        if not key.startswith("mgr."):
+            continue
+        for fragment in ("da khoi dong", "da chay", "khong khoi dong",
+                         "thoat ngay", "chua san sang"):
+            assert fragment not in value, f"{key}: {value!r}"
+
+
 # --- (d) get_language -------------------------------------------------
 
 @pytest.mark.parametrize("cfg,expected", [
