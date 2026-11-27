@@ -628,7 +628,8 @@
     ngay, khong can khoi dong lai server; tab Muse tao/gui briefing
     cung doc config luc goi nen dung ngon ngu hien tai. **Khong
     dich:** noi dung bai bao goc trong kho tin giu nguyen ngon ngu
-    goc; **CLI/console/log van tieng Viet khong dau.**
+    goc; **nhan tieng Viet tren web UI co dau day du;
+    CLI/console/log van tieng Viet khong dau.**
 52. **[ĐÃ CÓ — 2026-11-27] Trang chu web UI hien tin doi da phan
     tich, kem nhan dinh theo tung desk** (`webapi.py`
     `GET /api/team-news`, xem `docs/web-ui.md` §7): 1 endpoint gop

@@ -179,7 +179,8 @@ Khong lam duoc (va khong bao gio lam):
   server; tab Muse (`POST /api/briefing`, `POST /api/muse-send`)
   doc config luc goi nen luon dung ngon ngu hien tai.
 - **Khong dich:** noi dung bai bao goc trong kho tin giu nguyen ngon
-  ngu goc. **CLI/console/log van tieng Viet khong dau.**
+  ngu goc. Nhan tieng Viet tren web UI co dau day du (xem
+  `webui/src/i18n.tsx`); **CLI/console/log van tieng Viet khong dau.**
 
 ### Tin doi da phan tich o trang chu
 
