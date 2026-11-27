@@ -27,8 +27,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .data.news import TRUST_TIERS, NewsStore, run_news
+from .data.news import NewsStore, run_news
 from .data.providers import build_feed
+from .i18n import get_language, t
 from .models.macro import macro_edge
 from .signals import generate_signals
 
@@ -119,10 +120,10 @@ def _open_feed_for_symbol(cfg, desk, symbol, feed):
     return feed, False
 
 
-def _format_regime(regime):
+def _format_regime(regime, lang="vi"):
     """Regime (dict tu signals.detect_regime, hoac str) -> 1 dong doc duoc."""
     if regime is None:
-        return "(khong co thong tin regime)"
+        return t("briefing.regime_none", lang)
     if isinstance(regime, str):
         return regime
     if isinstance(regime, dict):
@@ -133,18 +134,19 @@ def _format_regime(regime):
         conf = regime.get("confidence")
         parts = [str(name)]
         if direction:
-            parts.append(f"huong {direction}")
+            parts.append(t("briefing.regime_direction", lang,
+                           value=direction))
         if adx is not None:
             parts.append(f"ADX {adx}")
         if vol:
-            parts.append(f"bien dong {vol}")
+            parts.append(t("briefing.regime_volatility", lang, value=vol))
         if conf is not None:
-            parts.append(f"do tin cay {conf}")
+            parts.append(t("briefing.regime_confidence", lang, value=conf))
         return " | ".join(parts)
     return str(regime)
 
 
-def _format_patterns(patterns):
+def _format_patterns(patterns, lang="vi"):
     """Patterns (list str hoac dict, doc phong thu) -> list dong doc duoc.
 
     Signals co the tra ve 1 pattern cho MOI bar (vd 60 doji) nen md
@@ -191,9 +193,11 @@ def _format_patterns(patterns):
         if extra:
             parts.append(extra)
         if entry["count"] > 1:
-            parts.append(f"x{entry['count']} lan")
+            parts.append(t("briefing.pattern_times", lang,
+                           count=entry['count']))
         if entry["last_bar"] is not None:
-            parts.append(f"bar moi nhat {entry['last_bar']}")
+            parts.append(t("briefing.pattern_latest_bar", lang,
+                           bar=entry['last_bar']))
         lines.append(" ".join(parts) if len(parts) == 1
                      else f"{parts[0]} ({', '.join(parts[1:])})")
     return lines
@@ -260,76 +264,84 @@ def _verdict_template(desk, analyst, generated):
 # --- Render Markdown ---
 
 def _render_md(desk, analyst, symbols_data, news_grouped, news_errors,
-               macro, verdict, generated):
-    """Noi dung file .md (tieng Viet khong dau)."""
+               macro, verdict, generated, lang="vi"):
+    """Noi dung file .md (mac dinh tieng Viet khong dau — ban cu).
+
+    lang "vi" | "en": template (tieu de, muc, canh bao tier, huong dan
+    verdict) dich theo ngon ngu; tieu de / nguon / tom tat tin tuc
+    GIU NGUYEN nhu lay ve (khong dich noi dung tin); ten truong
+    trong verdict JSON giu nguyen.
+    """
     stamp = generated.strftime("%Y-%m-%d %H:%M UTC")
     lines = [
-        f"# BRIEFING PHAN TICH — DESK {desk.upper()}",
+        t("briefing.title", lang, desk=desk.upper()),
         "",
-        f"Chao {analyst},",
+        t("briefing.greeting", lang, analyst=analyst),
         "",
-        "Briefing nay tong hop gia + tin hieu ky thuat (TA), tin thi truong "
-        "va boi canh vi mo de ban dua ra verdict cho desk "
-        f"{desk} truoc phien giao dich.",
+        t("briefing.intro", lang, desk=desk),
         "",
-        f"- Desk: {desk}",
-        f"- Analyst: {analyst}",
-        f"- Ngay tao (UTC): {stamp}",
-        "- Symbols: " + ", ".join(s['symbol'] for s in symbols_data),
+        t("briefing.desk", lang, desk=desk),
+        t("briefing.analyst", lang, analyst=analyst),
+        t("briefing.created", lang, stamp=stamp),
+        t("briefing.symbols", lang,
+          symbols=", ".join(s['symbol'] for s in symbols_data)),
         "",
-        "## TONG QUAN KY THUAT (TA)",
+        t("briefing.ta_heading", lang),
         "",
     ]
     for item in symbols_data:
         lines.append(f"### {item['symbol']}")
-        lines.append(f"- Gia moi nhat: {item['price']}")
-        lines.append(f"- Tin hieu: {item['action']} — {item['reason']}")
-        lines.append(f"- Regime: {_format_regime(item['regime'])}")
-        pattern_lines = _format_patterns(item.get("patterns") or [])
+        lines.append(t("briefing.symbol_price", lang, price=item['price']))
+        lines.append(t("briefing.symbol_signal", lang,
+                       action=item['action'], reason=item['reason']))
+        lines.append(t("briefing.symbol_regime", lang,
+                       regime=_format_regime(item['regime'], lang)))
+        pattern_lines = _format_patterns(item.get("patterns") or [], lang)
         if pattern_lines:
-            lines.append("- Patterns:")
+            lines.append(t("briefing.patterns", lang))
             for pat in pattern_lines:
                 lines.append(f"  - {pat}")
         levels = item.get("levels") or {}
         if levels:
-            lines.append(
-                "- Levels: entry={entry} SL={sl} TP={tp} ATR={atr}".format(
-                    entry=levels.get("entry", "?"),
-                    sl=levels.get("sl", "?"),
-                    tp=levels.get("tp", "?"),
-                    atr=levels.get("atr", "?")))
+            lines.append(t(
+                "briefing.levels", lang,
+                entry=levels.get("entry", "?"),
+                sl=levels.get("sl", "?"),
+                tp=levels.get("tp", "?"),
+                atr=levels.get("atr", "?")))
         lines.append("")
-    lines.append("## TIN THI TRUONG")
+    lines.append(t("briefing.news_heading", lang))
     lines.append("")
     if news_errors:
-        lines.append("Loi lay tin:")
+        lines.append(t("briefing.news_errors", lang))
         for err in news_errors:
             lines.append(f"- {err}")
         lines.append("")
     for tier in (1, 2, 3):
-        label = TRUST_TIERS.get(tier, "BAO CHI")
+        label = t(f"briefing.tier_{tier}_label", lang)
         lines.append(f"### Tier {tier} — {label}")
         if tier == 3:
-            lines.append(
-                "CANH BAO: tin ro ri CHUA XAC MINH — khong dung lam can cu "
-                "duy nhat cho quyet dinh giao dich.")
+            lines.append(t("briefing.tier_3_warning", lang))
         items = news_grouped.get(f"tier_{tier}") or []
         if not items:
-            lines.append("(khong co tin.)")
+            lines.append(t("briefing.no_news", lang))
         for art in items:
-            flag = " [KHAN]" if art.get("is_urgent") else ""
+            flag = (" " + t("briefing.urgent_flag", lang)
+                    if art.get("is_urgent") else "")
+            # Nhan tier hien theo ngon ngu template (ban .md); ban
+            # .json giu nguyen trust_label goc tu module news.
+            tier_label = t(f"briefing.tier_{tier}_label", lang)
             lines.append(
-                f"- [{art['trust_label']}]{flag} {art['title']}")
+                f"- [{tier_label}]{flag} {art['title']}")
             lines.append(f"  {art['source']} | {art['link']}")
             if art.get("summary"):
                 lines.append(f"  {art['summary'][:200]}")
             if tier == 3:
                 lines.append(
-                    "  CANH BAO: tin ro ri CHUA XAC MINH — khong dung lam "
-                    "can cu duy nhat cho quyet dinh giao dich.")
+                    "  " + t("briefing.tier_3_warning", lang))
         lines.append("")
     if macro is not None:
-        lines.append("## VI MO (MACRO)")
+        lines.append(t("briefing.macro_heading", lang))
         lines.append("")
         snapshot = macro.get("snapshot") or {}
         for key, label in (("dxy", "DXY"), ("us10y", "US10Y"),
@@ -338,19 +350,14 @@ def _render_md(desk, analyst, symbols_data, news_grouped, news_errors,
                 lines.append(f"- {label}: {snapshot[key]}")
         for symbol, edge in (macro.get("edges") or {}).items():
             if isinstance(edge, dict):
-                lines.append(
-                    f"- {symbol}: macro edge score {edge.get('score')} — "
-                    f"{edge.get('summary')}")
+                lines.append(t("briefing.macro_edge", lang, symbol=symbol,
+                               score=edge.get('score'),
+                               summary=edge.get('summary')))
         lines.append("")
-    lines.append("## KET LUAN CAN TRA VE (VERDICT)")
+    lines.append(t("briefing.verdict_heading", lang))
     lines.append("")
-    lines.append(
-        f"{analyst} tra ve verdict theo dung mau JSON duoi day (1 object "
-        "JSON duy nhat, khong them truong ngoai mau).")
-    lines.append(
-        'direction chi nhan "buy" | "sell" | "neutral"; '
-        "confidence la so 0..1; drivers / risks la danh sach chuoi; "
-        "created_utc la thoi gian ISO UTC luc tao verdict.")
+    lines.append(t("briefing.verdict_intro", lang, analyst=analyst))
+    lines.append(t("briefing.verdict_rules", lang))
     lines.append("")
     lines.append("```json")
     lines.append(json.dumps(verdict, indent=2, ensure_ascii=False))
@@ -454,7 +461,8 @@ def build_briefing(cfg, desk, days=3, *, feed=None, news_fetcher=None,
     json_path = out / f"briefing-{desk}-{stamp}.json"
     md_path.write_text(
         _render_md(desk, analyst, symbols_data, news_grouped,
-                   news_errors, macro, verdict, generated),
+                   news_errors, macro, verdict, generated,
+                   lang=get_language(cfg)),
         encoding="utf-8")
     json_path.write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n",

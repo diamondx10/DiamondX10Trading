@@ -1,5 +1,9 @@
 # DiamondX10 Trading — COPY thành config.yaml và điền thông tin thật của bạn.
 # KHÔNG commit config.yaml (đã có trong .gitignore). Không để API key trong repo.
+# Ngon ngu giao dien (vi | en; mac dinh vi): ap dung cho web UI,
+# canh bao Telegram va briefing PTCB. CLI / console / log van tieng
+# Viet khong dau.
+language: vi
 fund:
   name: DiamondX10
   total_capital_usd: 10000

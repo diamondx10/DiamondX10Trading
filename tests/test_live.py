@@ -273,6 +273,7 @@ def test_process_symbol_refuses_live_account(tmp_decisions):
 
 def _cycle_cfg(telegram_enabled=False):
     cfg = load_config()
+    cfg["language"] = "en"
     cfg["telegram"] = {"enabled": telegram_enabled, "chat_id": "123",
                        "bot_token_env": "DIAMONDX10_TELEGRAM_TOKEN"}
     return cfg

@@ -72,6 +72,12 @@ File ghi ra `briefings/briefing-<desk>-<YYYYMMDD-HHMM>.md` (de doc,
 gui cho nha phan tich) + file `.json` cung ten (cung noi dung dang
 co cau truc). Thu muc `briefings/` la file runtime, da gitignore.
 
+Ngon ngu briefing theo lua chon cua user (quy tac 51): noi dung
+briefing viet bang ngon ngu trong `language:` cua `config.yaml`
+(mac dinh tieng Viet); doi bang nut toggle tren web UI
+(`POST /api/language`, xem `docs/web-ui.md` §7). Noi dung bai bao
+goc trong briefing giu nguyen ngon ngu goc, khong dich.
+
 Can co muc `news:` trong config (copy tu `config.example.yaml`);
 thieu thi lenh bao loi sach: `chua co news: trong config — copy tu
 config.example.yaml`. Tren may Linux khong co MT5, briefing dung

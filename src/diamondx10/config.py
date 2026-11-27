@@ -3,6 +3,10 @@ from pathlib import Path
 import yaml
 
 DEFAULT = {
+    # Ngon ngu giao dien (vi | en; mac dinh vi): web UI, canh bao
+    # Telegram, briefing PTCB. CLI / console / log van tieng Viet
+    # khong dau.
+    "language": "vi",
     "fund": {"name": "DiamondX10", "total_capital_usd": 10000,
              "desks": {"forex": {"manager": "Yuling Pan", "capital_usd": 2500},
                        "us_securities": {"manager": "Kathy", "capital_usd": 2500},

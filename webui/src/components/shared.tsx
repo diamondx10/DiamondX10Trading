@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useI18n } from '../i18n'
 
 export function useFetch<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null)
@@ -17,13 +18,20 @@ export function useFetch<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   return { data, loading, error, reload: load }
 }
 
-export function Loading() { return <div className="loading">Dang tai...</div> }
-export function Empty({ text = 'Chua co du lieu' }: { text?: string }) { return <div className="empty">{text}</div> }
+export function Loading() {
+  const { t } = useI18n()
+  return <div className="loading">{t('common.loading')}</div>
+}
+export function Empty({ text }: { text?: string }) {
+  const { t } = useI18n()
+  return <div className="empty">{text ?? t('common.empty')}</div>
+}
 export function Err({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const { t } = useI18n()
   return (
     <div className="error">
-      Khong tai duoc du lieu: {message}
-      {onRetry && <div style={{ marginTop: 8 }}><button className="btn secondary small" onClick={onRetry}>Thu lai</button></div>}
+      {t('common.loadError')}: {message}
+      {onRetry && <div style={{ marginTop: 8 }}><button className="btn secondary small" onClick={onRetry}>{t('common.retry')}</button></div>}
     </div>
   )
 }

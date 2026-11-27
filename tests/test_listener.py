@@ -20,7 +20,8 @@ ORIG_TEXT = "💎 DiamondX10 — BUY RECOMMENDATION (DEMO)\nEURUSD BUY @ 1.10"
 
 
 def _cfg(max_deviation=1.0):
-    return {"telegram": {"enabled": True, "chat_id": CHAT_ID,
+    return {"language": "en",
+            "telegram": {"enabled": True, "chat_id": CHAT_ID,
                          "max_entry_deviation_pct": max_deviation},
             "mt5": {"demo_only": True}}
 

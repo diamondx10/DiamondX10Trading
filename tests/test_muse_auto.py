@@ -110,6 +110,7 @@ def base_cfg():
                    "profile_dir": "data/muse-profile",
                    "headless": False, "wait_min": 10}
     cfg["telegram"] = {"enabled": True, "chat_id": "1234567890"}
+    cfg["language"] = "en"
     return cfg
 
 

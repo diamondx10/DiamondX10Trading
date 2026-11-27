@@ -19,6 +19,8 @@ import os
 import urllib.error
 import urllib.request
 
+from .i18n import resolve_language, t
+
 DEFAULT_TOKEN_ENV = "DIAMONDX10_TELEGRAM_TOKEN"
 TELEGRAM_API = "https://api.telegram.org"
 TIMEOUT_SECONDS = 10
@@ -53,13 +55,16 @@ def setup_status(cfg):
             "missing": missing}
 
 
-def format_test_message():
-    """Tin nhan thu — gui bang lenh `telegram-test` de kiem tra ket noi."""
+def format_test_message(lang=None, cfg=None):
+    """Tin nhan thu — gui bang lenh `telegram-test` de kiem tra ket noi.
+
+    lang: "vi" | "en" (uu tien); khong truyen thi doc config qua
+    get_language (mac dinh "vi").
+    """
     from datetime import datetime, timezone
+    lang = resolve_language(lang, cfg)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    return ("DiamondX10 — Telegram test message.\n"
-            "Bot connection OK. The bot will send buy/sell recommendations "
-            f"when a signal meets the criteria.\nTime: {now}")
+    return t("tg.test_message", lang, time=now)
 
 
 def _resolve_token(cfg, token=None):
@@ -138,17 +143,23 @@ def send_message(text, *, token=None, chat_id=None, cfg=None,
     return False
 
 
-def order_keyboard(pending_id, action, symbol, volume):
+def order_keyboard(pending_id, action, symbol, volume, lang=None,
+                   cfg=None):
     """Ban phim inline cho 1 lenh cho: nut dat lenh + nut bo qua.
 
     callback_data chi mang id ngan ("ord:<id>" / "skip:<id>") — KHONG
     mang tham so lenh (tham so nam trong store, tra theo id).
+    lang: "vi" | "en" (uu tien); khong truyen thi doc config qua
+    get_language (mac dinh "vi").
     """
+    lang = resolve_language(lang, cfg)
+    vol = _fmt_number(volume)
     return {"inline_keyboard": [
-        [{"text": f"✅ Place {action} {symbol} "
-                  f"{_fmt_number(volume)} lot",
+        [{"text": t("tg.place_button", lang, action=action, symbol=symbol,
+                    volume=vol),
           "callback_data": f"ord:{pending_id}"}],
-        [{"text": "❌ Ignore", "callback_data": f"skip:{pending_id}"}],
+        [{"text": t("tg.ignore_button", lang),
+          "callback_data": f"skip:{pending_id}"}],
     ]}
 
 
@@ -265,7 +276,7 @@ def _risk_reward(entry, sl, tp):
 
 
 def format_signal_alert(result, desk, manager=None, recommended=False,
-                        pending_id=None):
+                        pending_id=None, lang=None, cfg=None):
     """Tin KHUYEN NGHI mua/ban khi co tin hieu BUY/SELL dat chuan.
 
     result: dict ket qua cua process_symbol (co symbol/action/price/
@@ -276,68 +287,85 @@ def format_signal_alert(result, desk, manager=None, recommended=False,
     recommended=True: day chi la KHUYEN NGHI — lenh CHUA dat, nguoi
     dung phai bam nut tren Telegram de dat. Them dong "Not placed yet"
     va ma lenh cho (pending_id) de tra theo store.
+
+    lang: "vi" | "en" (uu tien); khong truyen thi doc config qua
+    get_language (mac dinh "vi"). Ban tieng Anh giu NGUYEN nhu cu.
     """
+    lang = resolve_language(lang, cfg)
     symbol = result.get("symbol", "?")
     action = result.get("action", "?")
-    lines = [f"💎 DiamondX10 — {action} RECOMMENDATION (DEMO)"]
+    lines = [t("tg.signal_header", lang, action=action)]
     desk_line = f"Desk: {desk}"
     if manager:
         desk_line += f" — {manager}"
     lines.append(desk_line)
     if recommended:
-        lines.append("Not placed yet — tap the button to place the order")
+        lines.append(t("tg.not_placed", lang))
         if pending_id:
-            lines.append(f"Pending order ID: {pending_id}")
-    lines.append(f"Symbol: {symbol} | Order: {action}")
+            lines.append(t("tg.pending_id", lang, id=pending_id))
+    lines.append(t("tg.symbol_order", lang, symbol=symbol, action=action))
     if result.get("price") is not None:
-        lines.append(f"Entry: {_fmt_number(result.get('price'))}")
+        lines.append(t("tg.entry", lang,
+                       value=_fmt_number(result.get('price'))))
     if result.get("sl") is not None or result.get("tp") is not None:
-        lines.append(f"SL: {_fmt_number(result.get('sl'))} | "
-                     f"TP: {_fmt_number(result.get('tp'))}")
+        lines.append(t("tg.sl_tp", lang,
+                       sl=_fmt_number(result.get('sl')),
+                       tp=_fmt_number(result.get('tp'))))
     if result.get("volume"):
-        lines.append(f"Volume: {_fmt_number(result.get('volume'))} lot")
+        lines.append(t("tg.volume", lang,
+                       value=_fmt_number(result.get('volume'))))
     if result.get("risk_usd") is not None:
-        lines.append(f"Max risk: ~{_fmt_number(result.get('risk_usd'))} USD")
+        lines.append(t("tg.max_risk", lang,
+                       value=_fmt_number(result.get('risk_usd'))))
     rr = _risk_reward(result.get("price"), result.get("sl"),
                       result.get("tp"))
     if rr:
-        lines.append(f"Risk:Reward (R:R): {rr}")
+        lines.append(t("tg.risk_reward", lang, value=rr))
     if result.get("status") == "TRADED" and not recommended:
-        status_line = "Status: DEMO order placed."
+        status_line = t("tg.status_placed", lang)
         if result.get("order") is not None:
-            status_line += f" Ticket: {result['order']}."
+            status_line += t("tg.ticket", lang, ticket=result['order'])
         lines.append(status_line)
     if result.get("time"):
-        lines.append(f"Time (UTC): {result['time']}")
+        lines.append(t("tg.time_utc", lang, value=result['time']))
     if result.get("reason"):
-        lines.append(f"Reason: {result['reason']}")
+        lines.append(t("tg.reason", lang, value=result['reason']))
     return "\n".join(lines)
 
 
-def format_blocked_alert(result, desk, manager=None):
+def format_blocked_alert(result, desk, manager=None, lang=None,
+                         cfg=None):
     """Tin canh bao khi lenh bi chan (BLOCKED-*).
 
     Co symbol / ma chan (status) / ly do day du de Kathy/Yuling biet
     vi sao khong co lenh. Neu tin hieu da co entry/SL/TP (vd
     BLOCKED-VOLUME-ZERO, BLOCKED-MARGIN) thi kem theo de biet lenh
     dinh dat la gi.
+
+    lang: "vi" | "en" (uu tien); khong truyen thi doc config qua
+    get_language (mac dinh "vi"). Ban tieng Anh giu NGUYEN nhu cu.
     """
+    lang = resolve_language(lang, cfg)
     symbol = result.get("symbol", "?")
     status = result.get("status", "BLOCKED")
-    lines = [f"DiamondX10 [{desk}] {symbol}: ORDER BLOCKED ({status})"]
+    lines = [t("tg.blocked_header", lang, desk=desk, symbol=symbol,
+               status=status)]
     desk_line = f"Desk: {desk}"
     if manager:
         desk_line += f" — {manager}"
     lines.append(desk_line)
     if result.get("action") in ("BUY", "SELL"):
-        lines.append(f"Signal: {result['action']}")
+        lines.append(t("tg.signal", lang, action=result['action']))
     if result.get("price") is not None:
-        lines.append(f"Entry: {_fmt_number(result.get('price'))}")
+        lines.append(t("tg.entry", lang,
+                       value=_fmt_number(result.get('price'))))
     if result.get("sl") is not None or result.get("tp") is not None:
-        lines.append(f"SL: {_fmt_number(result.get('sl'))} | "
-                     f"TP: {_fmt_number(result.get('tp'))}")
+        lines.append(t("tg.sl_tp", lang,
+                       sl=_fmt_number(result.get('sl')),
+                       tp=_fmt_number(result.get('tp'))))
     if result.get("volume"):
-        lines.append(f"Volume: {_fmt_number(result.get('volume'))} lot")
+        lines.append(t("tg.volume", lang,
+                       value=_fmt_number(result.get('volume'))))
     if result.get("reason"):
-        lines.append(f"Reason: {result['reason']}")
+        lines.append(t("tg.reason", lang, value=result['reason']))
     return "\n".join(lines)

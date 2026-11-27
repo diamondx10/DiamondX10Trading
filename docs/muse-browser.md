@@ -82,6 +82,9 @@ python -m diamondx10 briefing --all --send --wait-min 15
 
 Tao briefing nhu binh thuong (`briefings/briefing-<desk>-<gio>.md`)
 roi gui ngay file vua tao cho Muse, khong can chay 2 lenh rieng.
+Ngon ngu briefing theo lua chon cua user (quy tac 51): briefing
+duoc tao bang ngon ngu trong `language:` cua `config.yaml` (mac
+dinh tieng Viet).
 
 ### Ma thoat (exit code)
 

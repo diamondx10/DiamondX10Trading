@@ -7,21 +7,37 @@ import News from './components/News'
 import Backtest from './components/Backtest'
 import Activity from './components/Activity'
 import Settings from './components/Settings'
+import { I18nProvider, useI18n, type I18nKey, type Lang } from './i18n'
 
 const TABS = [
-  { id: 'overview', label: 'Tong quan' },
-  { id: 'positions', label: 'Vi the' },
-  { id: 'signals', label: 'Tin hieu' },
-  { id: 'muse', label: 'Muse' },
-  { id: 'news', label: 'Tin tuc' },
-  { id: 'backtest', label: 'Backtest' },
-  { id: 'activity', label: 'Hoat dong' },
-  { id: 'settings', label: 'Cai dat' },
+  { id: 'overview', label: 'tab.overview' },
+  { id: 'positions', label: 'tab.positions' },
+  { id: 'signals', label: 'tab.signals' },
+  { id: 'muse', label: 'tab.muse' },
+  { id: 'news', label: 'tab.news' },
+  { id: 'backtest', label: 'tab.backtest' },
+  { id: 'activity', label: 'tab.activity' },
+  { id: 'settings', label: 'tab.settings' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
 
-export default function App() {
+function LanguageToggle() {
+  const { lang, setLang } = useI18n()
+  const langs: Lang[] = ['vi', 'en']
+  return (
+    <div className="lang-toggle" role="group" aria-label="Language">
+      {langs.map((l) => (
+        <button key={l} className={lang === l ? 'active' : ''} onClick={() => setLang(l)}>
+          {l === 'vi' ? 'VI' : 'EN'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function Shell() {
+  const { t } = useI18n()
   const [tab, setTab] = useState<TabId>('overview')
   const [dark, setDark] = useState(() => {
     try { return localStorage.getItem('dx10-theme') === 'dark' } catch { return false }
@@ -36,17 +52,20 @@ export default function App() {
     <div className="app">
       <header className="header">
         <div className="brand"><h1>DiamondX10</h1><span>Trading — Demo</span></div>
-        <button className="btn secondary" onClick={() => setDark(!dark)} aria-label="Doi giao dien">
-          {dark ? 'Che do sang' : 'Che do toi'}
-        </button>
+        <div className="header-actions">
+          <LanguageToggle />
+          <button className="btn secondary" onClick={() => setDark(!dark)} aria-label={t('header.themeLabel')}>
+            {dark ? t('header.themeLight') : t('header.themeDark')}
+          </button>
+        </div>
       </header>
       <nav className="tabs">
-        {TABS.map((t) => (
-          <button key={t.id} className={`tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
+        {TABS.map((tr) => (
+          <button key={tr.id} className={`tab${tab === tr.id ? ' active' : ''}`} onClick={() => setTab(tr.id)}>{t(tr.label as I18nKey)}</button>
         ))}
       </nav>
       <main>
-        {tab === 'overview' && <Overview />}
+        {tab === 'overview' && <Overview onOpenNews={() => setTab('news')} />}
         {tab === 'positions' && <Positions />}
         {tab === 'signals' && <Signals />}
         {tab === 'muse' && <MuseTab />}
@@ -55,7 +74,15 @@ export default function App() {
         {tab === 'activity' && <Activity />}
         {tab === 'settings' && <Settings />}
       </main>
-      <footer className="footer">DiamondX10 Trading — demo only, khong dung tien that.</footer>
+      <footer className="footer">{t('footer')}</footer>
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <I18nProvider>
+      <Shell />
+    </I18nProvider>
   )
 }

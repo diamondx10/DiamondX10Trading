@@ -136,7 +136,7 @@ def test_format_signal_alert_has_all_fields():
     result = {"symbol": "EURUSD", "action": "BUY", "status": "TRADED",
               "reason": "SMA5 > SMA20, RSI 59", "volume": 0.01,
               "price": 103.0, "sl": 101.5, "tp": 106.0}
-    text = format_signal_alert(result, "forex")
+    text = format_signal_alert(result, "forex", lang="en")
     assert "EURUSD" in text and "BUY" in text
     assert "103" in text and "0.01" in text
     assert "101.5" in text and "106" in text
@@ -147,7 +147,7 @@ def test_format_blocked_alert_has_all_fields():
     result = {"symbol": "XAUUSD", "action": "BLOCKED-DRAWDOWN-FUND",
               "status": "BLOCKED-DRAWDOWN-FUND",
               "reason": "BLOCKED-DRAWDOWN-FUND: drawdown 11.0% vuot gioi han 10.0%"}
-    text = format_blocked_alert(result, "xauusd")
+    text = format_blocked_alert(result, "xauusd", lang="en")
     assert "XAUUSD" in text
     assert "BLOCKED-DRAWDOWN-FUND" in text
     assert "11.0%" in text
@@ -159,7 +159,7 @@ def test_format_signal_alert_recommendation():
               "price": 61594.0, "sl": 60000.0, "tp": 64782.0,
               "risk_usd": 67.0, "manager": "Rich",
               "time": "2026-11-27T09:00:00+00:00", "order": 123456}
-    text = format_signal_alert(result, "crypto", manager="Rich")
+    text = format_signal_alert(result, "crypto", manager="Rich", lang="en")
     assert "BUY RECOMMENDATION" in text
     assert "(DEMO)" in text
     assert "BTCUSD" in text and "BUY" in text
@@ -175,7 +175,7 @@ def test_format_signal_alert_recommendation():
 def test_format_signal_alert_sell():
     result = {"symbol": "EURUSD", "action": "SELL", "status": "TRADED",
               "price": 1.10, "sl": 1.12, "tp": 1.06, "volume": 0.01}
-    text = format_signal_alert(result, "forex")
+    text = format_signal_alert(result, "forex", lang="en")
     assert "SELL RECOMMENDATION" in text
     assert "SELL" in text
     assert "1:2" in text
@@ -183,7 +183,7 @@ def test_format_signal_alert_sell():
 
 def test_format_signal_alert_minimal_no_crash():
     text = format_signal_alert(
-        {"symbol": "XAUUSD", "action": "BUY", "status": "TRADED"}, "xauusd")
+        {"symbol": "XAUUSD", "action": "BUY", "status": "TRADED"}, "xauusd", lang="en")
     assert "BUY RECOMMENDATION" in text
     assert "XAUUSD" in text
 
@@ -193,7 +193,7 @@ def test_format_blocked_alert_with_levels():
               "status": "BLOCKED-VOLUME-ZERO",
               "reason": "volume tinh duoc = 0 (kiem tra risk/entry/SL)",
               "price": 3650.98, "sl": 3600.0, "tp": 3752.94, "volume": 0}
-    text = format_blocked_alert(result, "xauusd", manager="Yumi")
+    text = format_blocked_alert(result, "xauusd", manager="Yumi", lang="en")
     assert "BLOCKED-VOLUME-ZERO" in text
     assert "BUY" in text
     assert "3650.98" in text
@@ -213,7 +213,7 @@ def test_setup_status(monkeypatch):
 
 
 def test_format_test_message():
-    text = format_test_message()
+    text = format_test_message(lang="en")
     assert "DiamondX10" in text
     assert "test message" in text
     assert "recommendation" in text
@@ -233,7 +233,7 @@ def test_format_signal_alert_english_only():
                   "risk_usd": 67.0,
                   "time": "2026-11-27T09:00:00+00:00"}
         text = format_signal_alert(result, "crypto", manager="Rich",
-                                   recommended=True, pending_id="abcdef01")
+                                   recommended=True, pending_id="abcdef01", lang="en")
         assert f"{action} RECOMMENDATION" in text
         assert "(DEMO)" in text
         for vietnamese in ("KHUYẾN NGHỊ", "MUA", "BÁN", "Khối lượng",
@@ -245,7 +245,7 @@ def test_format_signal_alert_english_only():
                         "Time (UTC):", "Not placed yet",
                         "Pending order ID: abcdef01"):
             assert english in text
-    kb = order_keyboard("abcdef01", "BUY", "BTCUSD", 0.02)
+    kb = order_keyboard("abcdef01", "BUY", "BTCUSD", 0.02, lang="en")
     labels = [b["text"] for row in kb["inline_keyboard"] for b in row]
     assert labels == ["✅ Place BUY BTCUSD 0.02 lot", "❌ Ignore"]
 

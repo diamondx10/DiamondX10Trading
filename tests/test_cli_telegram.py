@@ -18,7 +18,8 @@ def test_telegram_test_not_ready(monkeypatch):
 
 def test_telegram_test_sends(monkeypatch):
     monkeypatch.setenv("DIAMONDX10_TELEGRAM_TOKEN", "token-gia")
-    cfg = {"telegram": {"enabled": True, "chat_id": "1234567890"}}
+    cfg = {"language": "en",
+           "telegram": {"enabled": True, "chat_id": "1234567890"}}
     sent = {}
 
     def fake_send(text, cfg=None, **kw):

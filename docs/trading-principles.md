@@ -506,21 +506,25 @@
     quá hạn thì nút hết tác dụng. Lúc bấm nút, giá thị trường lệch
     khỏi giá khuyến nghị quá `telegram.max_entry_deviation_pct` (1,0%)
     thì listener tự chối đặt lệnh. Hai số này chỉnh được trong config.
-44. **[ĐÃ CHỐT — Phu duyệt 2026-11-27] Giao diện Telegram bằng tiếng
-    Anh (tin nhắn, nút bấm, câu trả lời callback); CLI/console/log
-    vẫn tiếng Việt không dấu.** Mọi text người dùng thấy trên Telegram
-    đều tiếng Anh: tin khuyến nghị (`BUY/SELL RECOMMENDATION (DEMO)`,
-    các trường Entry / SL / TP / Volume / Max risk / R:R), tin chặn
-    (`ORDER BLOCKED`), tin thử, nút bấm (`Place <HƯỚNG> <SYMBOL>
-    <lot> lot` / `Ignore`), câu trả lời callback (`Order placed`,
-    `No permission`, `Order expired`, `Order not found`,
-    `Kill switch is ON`, `Not a demo account`, `Insufficient margin`,
+44. **[ĐÃ CHỐT — sua doi 2026-11-27] Giao dien Telegram theo ngon
+    ngu da chon (tieng Viet mac dinh hoac tieng Anh); khong con
+    tieng Anh bat buoc nhu ban chot 2026-11-27 truoc do.** Muc
+    `language:` o cap cao nhat cua `config.yaml` quyet dinh ngon ngu
+    (`vi` mac dinh, `en` neu chon — xem quy tac 51): tin khuyen nghi
+    (`BUY/SELL RECOMMENDATION (DEMO)` / ban tieng Viet tuong duong),
+    tin chan (`ORDER BLOCKED`), tin thu, nut bam
+    (`Place <HƯỚNG> <SYMBOL> <lot> lot` / `Ignore` va ban tieng Viet),
+    cau tra loi callback (`Order placed`, `No permission`,
+    `Order expired`, `Order not found`, `Kill switch is ON`,
+    `Not a demo account`, `Insufficient margin`,
     `Price moved too far from recommendation`, `Order failed: ...`,
-    `Ignored`) và tin nhắn đã sửa (`ORDER PLACED — ticket #X`,
-    `Ignored.`, `Order could not be placed: ...`). Lý do nội bộ của
-    kho lệnh chờ (`pending.py`: `khong tim thay lenh` / `lenh da het
-    han` / `lenh da duoc xu ly`) giữ nguyên tiếng Việt không dấu, chỉ
-    dịch sang tiếng Anh tại biên Telegram (`listener.py`).
+    `Ignored`) va tin nhan da sua (`ORDER PLACED — ticket #X`,
+    `Ignored.`, `Order could not be placed: ...`) deu theo ngon ngu
+    da chon. **CLI/console/log van tieng Viet khong dau.** Ly do noi
+    bo cua kho lenh cho (`pending.py`: `khong tim thay lenh` / `lenh
+    da het han` / `lenh da duoc xu ly`) giu nguyen tieng Viet khong
+    dau, chi dich sang ngon ngu da chon tai bien Telegram
+    (`listener.py`).
 45. **[ĐÃ CÓ — 2026-11-27] Tu dong hoa trinh duyet cho khau ban giao
     PTCB** (`muse_browser.py` `send_briefing`, lenh `muse-send` /
     `briefing --send`, xem `docs/muse-browser.md`): dx10 dieu khien
@@ -587,8 +591,9 @@
     duyet, chua dang nhap, khong tim thay composer, khong tao duoc
     briefing). Het phien dang nhap (khong tim thay composer — co
     `session_expired` trong ket qua gui) thi gui them canh bao
-    Telegram bang tieng Anh (quy tac 44) de Phu dang nhap lai bang
-    tay; loi Telegram la best-effort, khong bao gio che mat loi goc.
+    Telegram theo ngon ngu da chon (quy tac 44, 51) de Phu dang nhap
+    lai bang tay; loi Telegram la best-effort, khong bao gio che mat
+    loi goc.
     Sau moi lan chay ghi `decisions/fa-cycle-state.json`
     (`started_utc` + tung desk `{sent, verdict_stored, reason}`,
     khong chua token hay du lieu phien, file runtime da gitignore)
@@ -608,6 +613,34 @@
     thu `[ten co hau to, ten chuan]` qua `symbol_info`, ten nao co
     tren server thi dung; ca hai ten deu khong co thi bao loi neu ro
     ca hai ten da thu + server.
+51. **[ĐÃ CÓ — 2026-11-27] Giao dien song ngu Anh/Viet, co lua chon
+    cua user — mac dinh tieng Viet** (`i18n.py` `get_language` /
+    bo dich, `webapi.py` `GET/POST /api/language`, xem
+    `docs/web-ui.md` §7): moi giao dien deu ho tro tieng Anh VA
+    tieng Viet, user chon 1 lan bang nut doi ngon ngu tren web UI
+    (hoac sua truc tiep khoa `language:` o cap cao nhat cua
+    `config.yaml` local, gia tri `vi` | `en`, mac dinh `vi` khi
+    thieu/sai). Lua chon chay theo ca 3 noi: **web UI** (nhan, tab),
+    **Telegram** (tin khuyen nghi/chan/thu, nut bam, cau tra loi
+    callback — quy tac 44), **briefing** (noi dung briefing tao ra
+    bang ngon ngu da chon — xem `docs/analysis-workflow.md`).
+    Web UI doc lai config moi request nen doi ngon ngu co hieu luc
+    ngay, khong can khoi dong lai server; tab Muse tao/gui briefing
+    cung doc config luc goi nen dung ngon ngu hien tai. **Khong
+    dich:** noi dung bai bao goc trong kho tin giu nguyen ngon ngu
+    goc; **CLI/console/log van tieng Viet khong dau.**
+52. **[ĐÃ CÓ — 2026-11-27] Trang chu web UI hien tin doi da phan
+    tich, kem nhan dinh theo tung desk** (`webapi.py`
+    `GET /api/team-news`, xem `docs/web-ui.md` §7): 1 endpoint gop
+    tra `{items, verdicts, briefings}` — `items`: bai tin moi nhat
+    moi desk tu kho tin (`data/news.py` `NewsStore`: `title`,
+    `source`, `tier` 1/2/3, `desk`, `analyst`, `time`,
+    `briefing_url` tro toi briefing moi nhat cua desk do, null neu
+    chua co); `verdicts`: nhan dinh PTCB moi nhat moi desk
+    (`{direction, confidence}` hoac null neu chua co, tu kho
+    `decisions/fundamental-verdicts.json`); `briefings`: file
+    briefing moi nhat moi desk (`{desk, file, time}`). Thieu du lieu
+    thi tra list rong / null, khong bao gio traceback.
 
 ## 8. Những điểm đang lệch giữa nghiên cứu và code
 

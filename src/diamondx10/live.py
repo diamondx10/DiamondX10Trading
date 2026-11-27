@@ -522,6 +522,8 @@ def _maybe_send_alert(cfg, desk, result, telegram):
     """
     if not telegram_mod.telegram_enabled(cfg):
         return False
+    from .i18n import get_language
+    lang = get_language(cfg)
     status = result.get("status", "")
     manager = ((cfg or {}).get("fund") or {}).get("desks", {}).get(desk, {})
     manager = manager.get("manager") if isinstance(manager, dict) else None
@@ -529,10 +531,10 @@ def _maybe_send_alert(cfg, desk, result, telegram):
         pending_id = result.get("pending_id")
         text = telegram_mod.format_signal_alert(
             result, desk, manager=manager, recommended=True,
-            pending_id=pending_id)
+            pending_id=pending_id, lang=lang)
         keyboard = telegram_mod.order_keyboard(
             pending_id, result.get("action"), result.get("symbol"),
-            result.get("volume"))
+            result.get("volume"), lang=lang)
         if telegram is not None:
             try:
                 return bool(telegram(text, reply_markup=keyboard))
@@ -545,9 +547,11 @@ def _maybe_send_alert(cfg, desk, result, telegram):
         return telegram_mod.send_message(text, cfg=cfg,
                                          reply_markup=keyboard)
     if status == "TRADED":
-        text = telegram_mod.format_signal_alert(result, desk, manager=manager)
+        text = telegram_mod.format_signal_alert(result, desk,
+                                                manager=manager, lang=lang)
     elif status.startswith("BLOCKED-"):
-        text = telegram_mod.format_blocked_alert(result, desk, manager=manager)
+        text = telegram_mod.format_blocked_alert(result, desk,
+                                                 manager=manager, lang=lang)
     else:
         return False
     if telegram is not None:

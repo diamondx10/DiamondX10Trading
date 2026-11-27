@@ -11,6 +11,10 @@ export interface Verdict { desk: string; analyst: string; direction: string; con
 export interface Article { title: string; url: string; source: string; tier: number | string; published: string }
 export interface Bar { time: string; open: number; high: number; low: number; close: number }
 export interface MuseJob { status: 'sending' | 'sent' | 'verdict_stored' | 'timeout' | 'error'; verdict: Record<string, unknown> | null; reason: string }
+export interface TeamNewsItem { title: string; source: string; tier: number | string; desk: string; analyst: string; time: string; briefing_url: string | null }
+export interface TeamNewsVerdict { direction: string; confidence: number | null }
+export interface TeamNewsBriefing { desk: string; file: string; time: string }
+export interface TeamNews { items: TeamNewsItem[]; verdicts: Record<string, TeamNewsVerdict | null>; briefings: TeamNewsBriefing[] }
 
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {

@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { createChart, type IChartApi, type ISeriesApi } from 'lightweight-charts'
 import { apiGet, type Bar } from '../api'
+import { useI18n } from '../i18n'
 import { Empty, Err, Loading } from './shared'
 import { useFetch } from './shared'
 
 export default function CandleChart({ symbol }: { symbol: string }) {
+  const { t } = useI18n()
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -36,6 +38,6 @@ export default function CandleChart({ symbol }: { symbol: string }) {
 
   if (loading) return <Loading />
   if (error) return <Err message={error} />
-  if (!data || data.bars.length === 0) return <Empty text={`Chua co du lieu nen cho ${symbol}`} />
+  if (!data || data.bars.length === 0) return <Empty text={t('sig.noBars', { symbol })} />
   return <div className="chart-wrap" ref={containerRef} />
 }

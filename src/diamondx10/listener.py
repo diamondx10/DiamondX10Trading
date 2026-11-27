@@ -36,23 +36,77 @@ import time
 from . import execution, killswitch
 from .data.mt5_feed import build_symbol_map, resolve_mt5_symbol
 from .decisions import log_decision
+from .i18n import get_language, t
 
 DEFAULT_MAX_ENTRY_DEVIATION_PCT = 1.0
 EMPTY_KEYBOARD = {"inline_keyboard": []}
 
 # Ly do tu kho lenh cho (pending.py, tieng Viet khong dau — giu nguyen
-# ben trong store) dich sang tieng Anh tai bien Telegram: chi text
-# nguoi dung thay tren Telegram moi doi, logic/store khong doi.
+# ben trong store) dich sang ngon ngu Telegram: chi text nguoi dung
+# thay tren Telegram moi doi, logic/store khong doi. place_pending_order
+# (core dung chung voi web API) luon tra ly do tieng Anh; chi lop
+# hien thi Telegram o day moi dich sang tieng Viet khi cau hinh "vi".
 _REASON_EN = {
     "khong tim thay lenh": "Order not found",
     "lenh da het han": "Order expired",
     "lenh da duoc xu ly": "Order already processed",
 }
 
+_REASON_VI = {
+    "khong tim thay lenh": "Không tìm thấy lệnh",
+    "lenh da het han": "Lệnh đã hết hạn",
+    "lenh da duoc xu ly": "Lệnh đã được xử lý",
+    "Order not found": "Không tìm thấy lệnh",
+    "Order expired": "Lệnh đã hết hạn",
+    "Order already processed": "Lệnh đã được xử lý",
+}
 
-def _to_telegram_reason(reason):
-    """Dich ly do noi bo (tieng Viet) sang tieng Anh de gui Telegram."""
+# Ly do tieng Anh (tu place_pending_order) -> khoa i18n de dich sang
+# tieng Viet o lop hien thi Telegram. Ly do dong (vd "Symbol ... not
+# found on MT5 server ...", loi goc tu MT5) khong co trong bang thi
+# giu nguyen tieng Anh.
+_LISTENER_REASON_KEYS = {
+    "Order placed": "listener.order_placed",
+    "No permission": "listener.no_permission",
+    "Invalid order": "listener.invalid_order",
+    "Order not found": "listener.order_not_found",
+    "Order expired": "listener.order_expired",
+    "Order already processed": "listener.order_processed",
+    "Kill switch is ON": "listener.kill_switch_on",
+    "Not a demo account": "listener.not_demo",
+    "Insufficient margin": "listener.insufficient_margin",
+    "Price moved too far from recommendation": "listener.price_moved",
+    "Could not get market price": "listener.no_market_price",
+    "Ignored": "listener.ignored",
+    "Error reading pending order": "listener.error_reading",
+}
+
+
+def _to_telegram_reason(reason, lang="en"):
+    """Dich ly do noi bo sang ngon ngu Telegram (mac dinh tieng Anh).
+
+    lang="vi": tra ban tieng Viet co dau; lang khac: ban tieng Anh
+    (hanh vi cu — core place_pending_order dung mac dinh nay).
+    """
+    if lang == "vi":
+        return _REASON_VI.get(reason or "", reason or "")
     return _REASON_EN.get(reason or "", reason or "")
+
+
+def _translate_listener_reason(reason, lang):
+    """Dich ly do tieng Anh tu place_pending_order sang ngon ngu hien
+    thi (lang "vi" | "en"). Ly do khong biet / dong thi giu nguyen."""
+    if lang != "vi":
+        return reason or ""
+    reason = reason or ""
+    key = _LISTENER_REASON_KEYS.get(reason)
+    if key:
+        return t(key, lang)
+    failed_prefix = "Order failed: "
+    if reason.startswith(failed_prefix):
+        return (t("listener.order_failed_prefix", lang)
+                + reason[len(failed_prefix):])
+    return reason
 
 
 def _telegram_cfg(cfg):
@@ -143,8 +197,10 @@ def _edit_message(tg, chat_id, message_id, text, cfg=None):
 def _refuse(tg, callback_query_id, chat_id, message_id, orig_text, reason,
             cfg=None):
     """Tu choi lenh: tra loi ly do + sua tin goc (bo nut, ghi ly do)."""
-    _answer(tg, callback_query_id, reason, cfg=cfg)
-    note = f"\n\nOrder could not be placed: {reason}"
+    lang = get_language(cfg)
+    reason_t = _translate_listener_reason(reason, lang)
+    _answer(tg, callback_query_id, reason_t, cfg=cfg)
+    note = "\n\n" + t("listener.could_not_place", lang, reason=reason_t)
     _edit_message(tg, chat_id, message_id, (orig_text or "") + note,
                   cfg=cfg)
 
@@ -157,18 +213,20 @@ def _resolve_order(tg, store, callback_query_id, chat_id, message_id,
         order, reason = store.resolve(order_id)
     except Exception as exc:  # noqa: BLE001 — store hong cung khong crash
         print(f"LOI listener resolve lenh {order_id!r}: {exc}")
-        _answer(tg, callback_query_id, "Error reading pending order",
-                cfg=cfg)
+        lang = get_language(cfg)
+        err = t("listener.error_reading", lang)
+        _answer(tg, callback_query_id, err, cfg=cfg)
         _edit_message(tg, chat_id, message_id,
-                      (orig_text or "") + "\n\nError reading pending order.",
+                      (orig_text or "") + "\n\n" + err + ".",
                       cfg=cfg)
         return None, False
     if order is None:
-        reason = _to_telegram_reason(reason or "khong tim thay lenh")
+        lang = get_language(cfg)
+        reason = _to_telegram_reason(reason or "khong tim thay lenh", lang)
         _answer(tg, callback_query_id, reason, cfg=cfg)
         _edit_message(tg, chat_id, message_id,
-                      (orig_text or "") + "\n\nOrder could not be "
-                      f"processed: {reason}",
+                      (orig_text or "") + "\n\n"
+                      + t("listener.could_not_process", lang, reason=reason),
                       cfg=cfg)
         return None, False
     return order, True
@@ -180,9 +238,11 @@ def _handle_skip(tg, store, callback_query_id, chat_id, message_id,
         store.mark_cancelled(order_id)
     except Exception as exc:  # noqa: BLE001 — mark loi thi chi ghi log
         print(f"LOI listener mark_cancelled {order_id!r}: {exc}")
-    _answer(tg, callback_query_id, "Ignored", cfg=cfg)
+    lang = get_language(cfg)
+    ignored = t("listener.ignored", lang)
+    _answer(tg, callback_query_id, ignored, cfg=cfg)
     _edit_message(tg, chat_id, message_id,
-                  (orig_text or "") + "\n\nIgnored.", cfg=cfg)
+                  (orig_text or "") + "\n\n" + ignored + ".", cfg=cfg)
 
 
 def place_pending_order(cfg, mt5, store, order_id, kill_switch_path=None,
@@ -340,31 +400,37 @@ def _handle_place(tg, cfg, mt5, store, callback_query_id, chat_id,
         price_fn=price_fn)
     kind = result.get("kind")
     reason = result.get("reason") or ""
+    lang = get_language(cfg)
+    reason_t = _translate_listener_reason(reason, lang)
     if kind == "placed":
         _edit_message(tg, chat_id, message_id,
-                      f"ORDER PLACED — ticket #{result.get('ticket')}\n"
-                      f"{orig_text or ''}",
+                      t("listener.order_placed_heading", lang,
+                        ticket=result.get('ticket'))
+                      + f"\n{orig_text or ''}",
                       cfg=cfg)
-        _answer(tg, callback_query_id, "Order placed", cfg=cfg)
+        _answer(tg, callback_query_id, t("listener.order_placed", lang),
+                cfg=cfg)
         return
     if kind == "not_found":
-        _answer(tg, callback_query_id, reason, cfg=cfg)
+        _answer(tg, callback_query_id, reason_t, cfg=cfg)
         _edit_message(tg, chat_id, message_id,
-                      (orig_text or "") + "\n\nOrder could not be "
-                      f"processed: {reason}",
+                      (orig_text or "") + "\n\n"
+                      + t("listener.could_not_process", lang,
+                          reason=reason_t),
                       cfg=cfg)
         return
     if kind == "error":
-        _answer(tg, callback_query_id, reason, cfg=cfg)
+        _answer(tg, callback_query_id, reason_t, cfg=cfg)
         _edit_message(tg, chat_id, message_id,
-                      (orig_text or "") + "\n\nError reading pending order.",
+                      (orig_text or "") + "\n\n" + reason_t + ".",
                       cfg=cfg)
         return
     if kind == "failed":
-        _answer(tg, callback_query_id, reason[:180], cfg=cfg)
+        _answer(tg, callback_query_id, reason_t[:180], cfg=cfg)
         _edit_message(tg, chat_id, message_id,
-                      (orig_text or "") + "\n\nOrder could not be placed: "
-                      f"{result.get('error') or reason}",
+                      (orig_text or "") + "\n\n"
+                      + t("listener.could_not_place", lang,
+                          reason=result.get('error') or reason_t),
                       cfg=cfg)
         return
     _refuse(tg, callback_query_id, chat_id, message_id, orig_text,
@@ -384,7 +450,8 @@ def _handle_callback(tg, cfg, mt5, store, update,
     # Chi chat trong config moi co quyen.
     allowed = _allowed_chat_id(cfg)
     if not allowed or str(chat_id) != allowed:
-        _answer(tg, callback_query_id, "No permission", cfg=cfg)
+        _answer(tg, callback_query_id,
+                t("listener.no_permission", get_language(cfg)), cfg=cfg)
         print("Listener: bo qua callback tu chat khong co quyen "
               f"(chat_id={chat_id!r}).")
         return
@@ -394,10 +461,12 @@ def _handle_callback(tg, cfg, mt5, store, update,
     elif data.startswith("skip:"):
         kind, order_id = "skip", data[len("skip:"):]
     else:
-        _answer(tg, callback_query_id, "Invalid order", cfg=cfg)
+        _answer(tg, callback_query_id,
+                t("listener.invalid_order", get_language(cfg)), cfg=cfg)
         return
     if not order_id:
-        _answer(tg, callback_query_id, "Invalid order", cfg=cfg)
+        _answer(tg, callback_query_id,
+                t("listener.invalid_order", get_language(cfg)), cfg=cfg)
         return
     order, ok = _resolve_order(tg, store, callback_query_id, chat_id,
                                message_id, orig_text, order_id, cfg=cfg)

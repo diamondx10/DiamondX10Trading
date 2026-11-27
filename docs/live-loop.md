@@ -158,6 +158,11 @@ nên cùng 1 định dạng. `mt5-dry-run` **không gửi** (chỉ xem trước,
 Tin chạy tay trước phiên (lệnh `news`, xem `docs/market-news.md`) —
 **vòng lặp không gửi tin tức tự động**, theo quyết định đã chốt.
 
+Ngôn ngữ Telegram theo lựa chọn của user (quy tắc 44, 51): tin nhắn,
+nút bấm và câu trả lời callback dùng ngôn ngữ trong `language:` của
+`config.yaml` (mặc định tiếng Việt); đổi bằng nút toggle trên web UI
+(`POST /api/language`, xem `docs/web-ui.md` §7).
+
 ### Khi Telegram lỗi
 
 Gửi lỗi (mất mạng, timeout, HTTP != 200, token/chat_id sai) thì tool in
@@ -210,7 +215,8 @@ thì lệnh mới được đặt (xem `docs/trading-principles.md` mục 41–4
   vào lệnh đã đặt / P&L / vị thế mở), trả kết quả `RECOMMENDED` và gửi
   khuyến nghị Telegram kèm 2 nút: **Place \<HƯỚNG> \<SYMBOL> \<lot>
   lot** và **Ignore**. Tin nhắn ghi rõ "Not placed yet — tap the button
-  to place the order".
+  to place the order" (hoặc bản tiếng Việt tương đương khi
+  `language: vi` — xem quy tắc 44, 51 và `docs/web-ui.md` §7).
 - **Lệnh chờ chỉ sống 15 phút** (`telegram.pending_order_ttl_min`,
   mặc định 15): quá hạn thì nút hết tác dụng, bấm vào chỉ nhận được
   "Order expired". Mỗi lệnh chờ chỉ dùng được 1 lần.
@@ -283,4 +289,5 @@ thì lệnh mới được đặt (xem `docs/trading-principles.md` mục 41–4
   `tests/test_recommend.py`, `tests/test_listener.py`.
 - `docs/trading-principles.md` mục 31 (vòng lặp live [ĐÃ CÓ]),
   mục 39–40 (tổng hợp Yuling + cổng PTCB), mục 41–44 (chế độ khuyến
-  nghị + nút đặt lệnh + giao diện Telegram tiếng Anh).
+  nghị + nút đặt lệnh + giao diện Telegram theo ngôn ngữ đã chọn),
+  mục 51 (song ngữ Anh/Việt).

@@ -17,7 +17,9 @@ Quy tac chung:
     thieu file state hay khong co MT5; MT5 tren Linux luon bao
     mt5_ok=false chu khong raise.
   - Config doc moi lan xu ly request (load_config) nen sua config
-    khong can khoi dong lai server.
+    khong can khoi dong lai server. Nho vay tab Muse (tao briefing /
+    gui briefing) va GET /api/language luon dung ngon ngu hien tai
+    trong config.yaml luc goi (quy tac 51).
   - muse_browser.py la hop dong TUY CHON: chi import LAZY trong worker
     gui briefing; neu chua co thi job bao loi "Muse browser chua san
     sang" chu khong crash server.
@@ -50,7 +52,7 @@ except ImportError as exc:  # noqa: BLE001 — chay thieu fastapi thi bao ro
     _FASTAPI_ERROR = exc
 
 from . import killswitch, telegram
-from .briefing import DESKS as BRIEFING_DESKS, build_briefing
+from .briefing import DESK_ANALYSTS, DESKS as BRIEFING_DESKS, build_briefing
 from .config import load_config
 from .dashboard import (
     _find_backtest_result,
@@ -90,6 +92,10 @@ DEFAULT_SYMBOLS = {
     "crypto": ["BTCUSD", "BNBUSD", "ETHUSD"],
 }
 
+# Ngon ngu giao dien (quy tac 51): "vi" | "en", mac dinh "vi".
+# Doc tu khoa `language:` o cap cao nhat cua config.yaml.
+SUPPORTED_LANGUAGES = ("vi", "en")
+
 # Registry tien trinh live / listener: {name: {"proc", "started", "mode"}}.
 _PROCS = {}
 # Job gui briefing len Muse: {job_id: {"status","verdict","reason"}}.
@@ -105,6 +111,122 @@ def _load_cfg():
         return load_config(DEFAULT_CONFIG_PATH)
     except Exception:  # noqa: BLE001 — config hong thi dung mac dinh rong
         return {}
+
+
+def _resolve_language(cfg):
+    """Ngon ngu hien tai ("vi" | "en", mac dinh "vi").
+
+    Neu module i18n (cua nhom) da co thi dung `i18n.get_language`
+    cua no de 1 cho duy nhat quyet dinh; chua co thi doc truc tiep
+    khoa `language:` o cap cao nhat cua config. Gia tri la thi
+    ve "vi" — khong bao gio raise.
+    """
+    try:
+        import importlib
+        i18n = importlib.import_module("diamondx10.i18n")
+        get_language = getattr(i18n, "get_language", None)
+        if callable(get_language):
+            lang = get_language(cfg)
+            if isinstance(lang, str) and lang in SUPPORTED_LANGUAGES:
+                return lang
+            return "vi"
+    except Exception:  # noqa: BLE001 — chua co i18n thi doc truc tiep
+        pass
+    lang = (cfg or {}).get("language")
+    if isinstance(lang, str) and lang.strip() in SUPPORTED_LANGUAGES:
+        return lang.strip()
+    return "vi"
+
+
+def _apply_language_to_config_text(text, language):
+    """Ap dung `language:` o cap cao nhat vao noi dung config.yaml.
+
+    Kieu quickstart._apply_telegram_to_config_text: thay dong
+    `language:` cap cao nhat neu co (khong dung vao dong `language:`
+    thut dau trong khoi con), chua co thi them o cuoi file. Cac khoa
+    va comment khac giu nguyen.
+    """
+    lines = text.splitlines()
+    out = []
+    seen = False
+    for line in lines:
+        stripped = line.strip()
+        if (not line.startswith((" ", "\t")) and stripped
+                and stripped.startswith("language:")):
+            out.append(f"language: {language}")
+            seen = True
+            continue
+        out.append(line)
+    if not seen:
+        if out and out[-1].strip():
+            out.append("")
+        out.append(f"language: {language}")
+    return "\n".join(out) + "\n"
+
+
+def _latest_briefing_by_desk():
+    """Briefing moi nhat moi desk: {desk: {"file", "time"}}."""
+    latest = {}
+    if BRIEFINGS_DIR.is_dir():
+        for path in BRIEFINGS_DIR.glob("briefing-*.md"):
+            try:
+                mtime = datetime.fromtimestamp(
+                    path.stat().st_mtime, tz=timezone.utc)
+            except OSError:
+                continue
+            parts = path.name.split("-")
+            desk = parts[1] if len(parts) > 1 else ""
+            if desk not in BRIEFING_DESKS:
+                continue
+            item = {"file": path.name, "time": mtime.isoformat()}
+            if desk not in latest or item["time"] > latest[desk]["time"]:
+                latest[desk] = item
+    return latest
+
+
+def _team_news_items(briefings_by_desk):
+    """Tin moi nhat moi desk tu kho tin (NewsStore).
+
+    Moi desk toi da 1 bai (bai moi nhat). Kho thieu/hong thi [] —
+    khong bao gio raise.
+    """
+    items = []
+    try:
+        if not NEWS_STORE_PATH.exists():
+            return []
+        conn = sqlite3.connect(f"file:{NEWS_STORE_PATH}?mode=ro",
+                               uri=True, timeout=5)
+        try:
+            rows = conn.execute(
+                "SELECT article_title, article_url, source, "
+                "trust_tier, pub_date, seen_at, desks "
+                "FROM seen_articles "
+                "ORDER BY seen_at DESC, rowid DESC LIMIT 200").fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 — kho tin loi thi rong
+        print(f"LOI webapi team-news: {exc}")
+        return []
+    seen_desks = set()
+    for title, url, source, tier, pub_date, seen_at, desks in rows:
+        for desk in (d.strip() for d in (desks or "").split(",")):
+            if desk not in BRIEFING_DESKS or desk in seen_desks:
+                continue
+            seen_desks.add(desk)
+            briefing = briefings_by_desk.get(desk)
+            items.append({
+                "title": title or "",
+                "source": source or "",
+                "tier": tier if tier in (1, 2, 3) else 2,
+                "desk": desk,
+                "analyst": DESK_ANALYSTS.get(desk, desk),
+                "time": pub_date or seen_at or "",
+                "briefing_url": (f"briefings/{briefing['file']}"
+                                 if briefing else None),
+            })
+        if len(seen_desks) >= len(BRIEFING_DESKS):
+            break
+    return items
 
 
 def _desk_symbols(cfg, desk):
@@ -704,6 +826,75 @@ def create_app(static_dir=None):
             raise HTTPException(status_code=400, detail=str(exc))
         return {"ok": True,
                 "reason": f"da luu nhan dinh desk {cleaned['desk']}"}
+
+    # --- Ngon ngu giao dien (quy tac 51) ---
+
+    @app.get("/api/language")
+    def api_language():
+        cfg = _load_cfg()
+        return {"language": _resolve_language(cfg)}
+
+    @app.post("/api/language")
+    def api_language_post(payload: dict):
+        language = payload.get("language") if isinstance(payload, dict) else None
+        if language not in SUPPORTED_LANGUAGES:
+            raise HTTPException(
+                status_code=400,
+                detail="language phai la 'vi' hoac 'en'")
+        if not DEFAULT_CONFIG_PATH.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail="khong tim thay config.yaml — chay quickstart "
+                       "truoc de tao config (khong tu tao config nua "
+                       "voi)")
+        try:
+            text = DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"khong doc duoc config.yaml: {exc}")
+        try:
+            DEFAULT_CONFIG_PATH.write_text(
+                _apply_language_to_config_text(text, language),
+                encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"khong ghi duoc config.yaml: {exc}")
+        return {"language": language}
+
+    # --- Tin doi da phan tich (trang chu, quy tac 52) ---
+
+    @app.get("/api/team-news")
+    def api_team_news():
+        try:
+            briefings_by_desk = _latest_briefing_by_desk()
+        except Exception as exc:  # noqa: BLE001 — thu muc loi thi rong
+            print(f"LOI webapi team-news briefings: {exc}")
+            briefings_by_desk = {}
+        try:
+            verdicts = load_verdicts()
+        except Exception as exc:  # noqa: BLE001 — kho hong thi rong
+            print(f"LOI webapi team-news verdicts: {exc}")
+            verdicts = {}
+        verdicts_out = {}
+        for desk in BRIEFING_DESKS:
+            verdict = verdicts.get(desk)
+            if verdict:
+                verdicts_out[desk] = {
+                    "direction": verdict.get("direction"),
+                    "confidence": verdict.get("confidence"),
+                }
+            else:
+                verdicts_out[desk] = None
+        briefings = [
+            {"desk": desk, "file": info["file"], "time": info["time"]}
+            for desk, info in sorted(briefings_by_desk.items())]
+        return {
+            "items": _team_news_items(briefings_by_desk),
+            "verdicts": verdicts_out,
+            "briefings": briefings,
+        }
 
     # --- Tin / backtest / bar ---
 

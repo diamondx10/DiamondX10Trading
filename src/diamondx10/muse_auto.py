@@ -30,6 +30,7 @@ from pathlib import Path
 from . import telegram as telegram_mod
 from .briefing import DESKS as BRIEFING_DESKS
 from .briefing import build_briefing
+from .i18n import get_language, t
 from .muse_browser import (
     DEFAULT_WAIT_MIN,
     MuseBrowserError,
@@ -40,8 +41,9 @@ from .muse_browser import (
 FA_CYCLE_STATE = (Path(__file__).resolve().parents[2] / "decisions"
                   / "fa-cycle-state.json")
 
-# Canh bao het phien — tieng Anh (quy tac 44: text gui Telegram la
-# tieng Anh).
+# Canh bao het phien — ban tieng Anh goc (giu nguyen de test cu van
+# dung); ban hien thi lay qua session_expired_alert() theo ngon ngu
+# config (mac dinh "vi").
 SESSION_EXPIRED_ALERT = (
     "DiamondX10 — Muse browser session expired.\n"
     "The automatic FA cycle could not send the briefing: the Muse "
@@ -51,6 +53,16 @@ SESSION_EXPIRED_ALERT = (
     "headed once and sign in to muse.ai in the browser window.\n"
     "The live loop keeps using the previous verdict meanwhile."
 )
+
+
+def session_expired_alert(lang=None, cfg=None):
+    """Text canh bao het phien Muse theo ngon ngu (mac dinh "vi").
+
+    lang thang "vi" | "en" (uu tien); khong truyen thi doc config qua
+    get_language. Chi doi ngon ngu hien thi, khong doi logic chu ky.
+    """
+    return t("muse.session_expired",
+             lang if lang is not None else get_language(cfg))
 
 DEFAULT_SEND_TIMEOUT_SEC = 60
 
@@ -70,7 +82,7 @@ def _notify_session_expired(cfg):
     Tra True neu gui duoc. Loi Telegram (chua cau hinh / mang loi)
     chi in CANH BAO, KHONG raise — khong che mat loi goc.
     """
-    ok = telegram_mod.send_message(SESSION_EXPIRED_ALERT, cfg=cfg)
+    ok = telegram_mod.send_message(session_expired_alert(cfg=cfg), cfg=cfg)
     if ok:
         print("OK: da gui canh bao het phien Muse qua Telegram — "
               "can dang nhap lai bang tay.")

@@ -6,7 +6,7 @@ cho Muse, nap verdict, xem tin + backtest + bieu do nen — tat ca tu
 trinh duyet, khong can go lenh CLI.
 
 > Da doi chieu 2026-11-27: danh sach endpoint o muc 4 khop 1-1 voi route
-> table trong `src/diamondx10/webapi.py` (25 route).
+> table trong `src/diamondx10/webapi.py` (28 route).
 
 ## 1. Chay
 
@@ -102,6 +102,9 @@ Goc: `http://127.0.0.1:8000`. Tat ca tra JSON.
 | GET | `/api/listener` | Trang thai telegram-listen |
 | POST | `/api/listener/start` | Bat telegram-listen |
 | POST | `/api/listener/stop` | Tat telegram-listen |
+| GET | `/api/language` | Ngon ngu giao dien hien tai (`vi` \| `en`) |
+| POST | `/api/language` | Doi ngon ngu (`{"language": "vi" \| "en"}`) |
+| GET | `/api/team-news` | Tin doi da phan tich trang chu (xem muc 7) |
 
 ## 5. Lam duoc / khong lam duoc
 
@@ -109,6 +112,8 @@ Lam duoc:
 
 - Xem trang thai, vi the, tin hieu, tong hop, tin tuc, backtest,
   bieu do nen, lich su quyet dinh.
+- Doi ngon ngu giao dien Anh/Viet (muc 7) va xem tin doi da phan
+  tich o trang chu (muc 7).
 - Duyet / bo lenh cho; bat tat kill switch; bat tat vong live va
   telegram-listen.
 - Tao briefing, gui briefing cho Muse, nap verdict paste tu chat.
@@ -140,10 +145,53 @@ Khong lam duoc (va khong bao gio lam):
   nay hay trong code frontend — token Telegram va mat khau MT5 van
   chi qua bien moi truong luc chay nhu cu.
 
+## 7. Ngon ngu giao dien + tin doi trang chu (quy tac 51–52)
+
+### Chon ngon ngu (Anh / Viet)
+
+- Web UI co **nut doi ngon ngu** (toggle VI/EN). Bam nut goi
+  `POST /api/language` voi `{"language": "vi" | "en"}`; gia tri khac
+  bi tra 400. Server ghi khoa `language:` o cap cao nhat cua
+  `config.yaml` local bang cach thay dong (giu nguyen moi khoa va
+  comment khac; chua co khoa thi them o cuoi file) — khong ghi de
+  toan bo file. Neu `config.yaml` chua co thi tra loi ro rang, khong
+  tu tao config nua voi. `GET /api/language` tra
+  `{"language": "vi" | "en"}`; thieu/sai thi mac dinh `"vi"`.
+- **Lua chon chay theo ca 3 noi:** web UI (nhan, tab) + **Telegram**
+  (tin khuyen nghi/chan/thu, nut bam, cau tra loi callback — xem
+  `docs/live-loop.md` §4/§6, quy tac 44) + **briefing** (noi dung
+  briefing tao ra bang ngon ngu da chon — xem
+  `docs/analysis-workflow.md` §2a). Backend doc lai config moi
+  request nen doi ngon ngu co hieu luc ngay, khong can khoi dong lai
+  server; tab Muse (`POST /api/briefing`, `POST /api/muse-send`)
+  doc config luc goi nen luon dung ngon ngu hien tai.
+- **Khong dich:** noi dung bai bao goc trong kho tin giu nguyen ngon
+  ngu goc. **CLI/console/log van tieng Viet khong dau.**
+
+### Tin doi da phan tich o trang chu
+
+Trang chu hien muc tin cua doi qua 1 endpoint gop
+`GET /api/team-news` tra `{"items", "verdicts", "briefings"}`:
+
+- `items`: bai tin **moi nhat moi desk** tu kho tin (`NewsStore`):
+  `title`, `source`, `tier` (1 chinh thong / 2 bao chi / 3 ro ri —
+  chua xac minh), `desk`, `analyst` (Yuling Pan / Yumi / Rich /
+  Kathy), `time`, `briefing_url` (duong dan tuong doi
+  `briefings/<file briefing moi nhat cua desk>`; null neu chua co
+  briefing — mo file tu tab Muse / danh sach briefing).
+- `verdicts`: nhan dinh PTCB moi nhat **moi desk**
+  (`{direction: buy|sell|neutral, confidence}` hoac `null` neu
+  chua co verdict) — doc tu `decisions/fundamental-verdicts.json`.
+- `briefings`: file briefing moi nhat moi desk
+  (`{desk, file, time}`).
+- Thieu du lieu (chua chay `news`, chua co verdict/briefing) thi tra
+  list rong / `null`, khong bao gio loi — muc tin chi hien "chua co
+  du lieu".
+
 ## Tai lieu lien quan
 
 - `docs/trading-principles.md` quy tac 47–48 (web UI, UI dung
-  lai kiem tra cua backend).
+  lai kiem tra cua backend), quy tac 51–52 (song ngu + tin doi).
 - `docs/dx10-flow.md` — flow van hanh 24/7 (live + listener).
 - `docs/live-loop.md` §6 — che do khuyen nghi + nut dat lenh.
 - `docs/muse-browser.md` — gui briefing cho Muse qua trinh duyet.

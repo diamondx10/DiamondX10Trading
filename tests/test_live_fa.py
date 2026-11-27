@@ -212,6 +212,7 @@ def test_fa_conflict_sends_blocked_alert(tmp_decisions):
     cfg = load_config()
     cfg["telegram"] = {"enabled": True, "chat_id": "123",
                        "bot_token_env": "DIAMONDX10_TELEGRAM_TOKEN"}
+    cfg["language"] = "en"
     mt5 = FakeMT5Live()
     sent = []
     feed = FakeLiveFeed(trend_bars(), latest=103.0, mt5=mt5)

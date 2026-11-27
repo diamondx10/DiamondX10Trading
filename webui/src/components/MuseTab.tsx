@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiGet, apiPost, DESK_LABELS, DESKS, type Briefing, type MuseJob, type Verdict } from '../api'
+import { useI18n } from '../i18n'
 import { Empty, Err, Loading, useFetch } from './shared'
 
 type JobState = { job_id: string; file: string } & MuseJob
 
 export default function MuseTab() {
+  const { t } = useI18n()
   const brief = useFetch(() => apiGet<{ briefings: Briefing[] }>('/api/briefings'))
   const verd = useFetch(() => apiGet<{ verdicts: Verdict[] }>('/api/verdicts'))
   const [desk, setDesk] = useState('forex')
@@ -41,10 +43,10 @@ export default function MuseTab() {
       const job: JobState = { job_id: r.job_id, file, status: 'sending', verdict: null, reason: '' }
       setJobs((prev) => ({ ...prev, [r.job_id]: job }))
       poll(r.job_id)
-      setMsg(`Da gui ${file} — dang cho Muse phan hoi...`)
+      setMsg(t('muse.sent', { file }))
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e)
-      setErr(`Gui that bai: ${m}. Neu backend bao 503, module trinh duyet Muse chua co tren may nay.`)
+      setErr(t('muse.sendFailed', { msg: m }))
     } finally { setBusy('') }
   }
 
@@ -52,8 +54,8 @@ export default function MuseTab() {
     setBusy('briefing'); setErr(null)
     try {
       const r = await apiPost<{ ok: boolean; file: string | null; reason: string }>('/api/briefing', { desk, days })
-      if (!r.ok) throw new Error(r.reason || 'That bai')
-      setMsg(`Da tao briefing: ${r.file ?? ''}`)
+      if (!r.ok) throw new Error(r.reason || t('pos.genericFail'))
+      setMsg(t('muse.briefingCreated', { file: r.file ?? '' }))
       brief.reload()
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setBusy('') }
   }
@@ -64,8 +66,8 @@ export default function MuseTab() {
       const parsed = JSON.parse(paste) as Record<string, unknown>
       const verdict = (parsed.verdict ?? parsed) as Record<string, unknown>
       const r = await apiPost<{ ok: boolean; reason: string }>('/api/verdicts', { verdict })
-      if (!r.ok) throw new Error(r.reason || 'That bai')
-      setMsg('Da luu verdict.')
+      if (!r.ok) throw new Error(r.reason || t('pos.genericFail'))
+      setMsg(t('muse.verdictSaved'))
       setPaste('')
       verd.reload()
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setBusy('') }
@@ -79,20 +81,20 @@ export default function MuseTab() {
       {err && <div className="error">{err}</div>}
 
       <div className="card">
-        <h2>Tao briefing moi</h2>
+        <h2>{t('muse.newBriefing')}</h2>
         <div className="btn-row">
-          <label>Desk <select value={desk} onChange={(e) => setDesk(e.target.value)}>
+          <label>{t('common.desk')} <select value={desk} onChange={(e) => setDesk(e.target.value)}>
             {DESKS.map((d) => <option key={d} value={d}>{DESK_LABELS[d]}</option>)}
           </select></label>
-          <label>So ngay <input type="number" min={1} max={30} value={days} style={{ width: 80 }} onChange={(e) => setDays(Number(e.target.value))} /></label>
-          <button className="btn" disabled={busy !== ''} onClick={makeBriefing}>Tao briefing</button>
+          <label>{t('muse.days')} <input type="number" min={1} max={30} value={days} style={{ width: 80 }} onChange={(e) => setDays(Number(e.target.value))} /></label>
+          <button className="btn" disabled={busy !== ''} onClick={makeBriefing}>{t('muse.createBriefing')}</button>
         </div>
       </div>
 
       <div className="card">
-        <h2>Briefings</h2>
-        {brief.loading ? <Loading /> : brief.error || !brief.data ? <Err message={brief.error ?? 'Khong co du lieu'} onRetry={brief.reload} />
-          : brief.data.briefings.length === 0 ? <Empty text="Chua co briefing nao" /> : (
+        <h2>{t('muse.briefings')}</h2>
+        {brief.loading ? <Loading /> : brief.error || !brief.data ? <Err message={brief.error ?? t('common.empty')} onRetry={brief.reload} />
+          : brief.data.briefings.length === 0 ? <Empty text={t('muse.briefingsEmpty')} /> : (
           <ul className="clean">{brief.data.briefings.map((b) => (
             <li key={b.file}>
               <strong>{b.name || b.file}</strong> <span className="muted small">· {b.desk} · {b.created}</span>
@@ -104,7 +106,7 @@ export default function MuseTab() {
           ))}</ul>)}
         {jobList.length > 0 && (
           <div style={{ marginTop: 16 }}>
-            <h3>Trang thai gui</h3>
+            <h3>{t('muse.sendStatus')}</h3>
             <ul className="clean">{jobList.map((j) => (
               <li key={j.job_id}><span className="badge">{j.status}</span> {j.file}
                 {j.reason && <span className="muted small"> — {j.reason}</span>}
@@ -116,19 +118,19 @@ export default function MuseTab() {
       </div>
 
       <div className="card">
-        <h2>Dan verdict (JSON)</h2>
-        <p className="muted small">Dan JSON verdict Muse tra ve (ca object hoac chi phan verdict), roi bam Luu verdict. Loi validation se hien o day.</p>
+        <h2>{t('muse.pasteVerdict')}</h2>
+        <p className="muted small">{t('muse.pasteHint')}</p>
         <textarea value={paste} onChange={(e) => setPaste(e.target.value)} placeholder='{"desk": "forex", "direction": "buy", "confidence": 0.7, ...}' />
         <div className="btn-row" style={{ marginTop: 10 }}>
-          <button className="btn" disabled={busy !== '' || !paste.trim()} onClick={submitVerdict}>Luu verdict</button>
+          <button className="btn" disabled={busy !== '' || !paste.trim()} onClick={submitVerdict}>{t('muse.saveVerdict')}</button>
         </div>
       </div>
 
       <div className="card">
-        <h2>Verdicts da luu</h2>
-        {verd.loading ? <Loading /> : verd.error || !verd.data ? <Err message={verd.error ?? 'Khong co du lieu'} onRetry={verd.reload} />
-          : verd.data.verdicts.length === 0 ? <Empty text="Chua co verdict nao" /> : (
-          <div className="table-wrap"><table><thead><tr><th>Desk</th><th>Analyst</th><th>Huong</th><th>Do tin cay</th><th>Drivers</th><th>Risks</th><th>Tuoi</th></tr></thead>
+        <h2>{t('muse.savedVerdicts')}</h2>
+        {verd.loading ? <Loading /> : verd.error || !verd.data ? <Err message={verd.error ?? t('common.empty')} onRetry={verd.reload} />
+          : verd.data.verdicts.length === 0 ? <Empty text={t('muse.savedEmpty')} /> : (
+          <div className="table-wrap"><table><thead><tr><th>{t('common.desk')}</th><th>{t('muse.thAnalyst')}</th><th>{t('muse.thDirection')}</th><th>{t('muse.thConfidence')}</th><th>{t('muse.thDrivers')}</th><th>{t('muse.thRisks')}</th><th>{t('muse.thAge')}</th></tr></thead>
           <tbody>{verd.data.verdicts.map((v, i) => (
             <tr key={i}><td>{v.desk}</td><td>{v.analyst}</td><td><span className={`badge ${v.direction.toLowerCase()}`}>{v.direction}</span></td>
             <td>{v.confidence === null ? '—' : `${(v.confidence * 100).toFixed(0)}%`}</td>

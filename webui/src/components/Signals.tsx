@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { apiGet, DESK_LABELS, DESKS, fmtNum, type Signal, type SynthesisItem } from '../api'
+import { useI18n } from '../i18n'
 import CandleChart from './CandleChart'
 import { Empty, Err, Loading, useFetch } from './shared'
 
@@ -11,6 +12,7 @@ const SYMBOLS: Record<string, string[]> = {
 }
 
 export default function Signals() {
+  const { t } = useI18n()
   const [desk, setDesk] = useState<string>('forex')
   const [symbol, setSymbol] = useState('EURUSD')
   const sig = useFetch(() => apiGet<{ desk: string; signals: Signal[] }>(`/api/signals?desk=${desk}`), [desk])
@@ -21,25 +23,25 @@ export default function Signals() {
     <div>
       <div className="card">
         <div className="btn-row">
-          <label>Desk <select value={desk} onChange={(e) => { setDesk(e.target.value); setSymbol((SYMBOLS[e.target.value] ?? ['EURUSD'])[0]) }}>
+          <label>{t('common.desk')} <select value={desk} onChange={(e) => { setDesk(e.target.value); setSymbol((SYMBOLS[e.target.value] ?? ['EURUSD'])[0]) }}>
             {DESKS.map((d) => <option key={d} value={d}>{DESK_LABELS[d]}</option>)}
           </select></label>
-          <label>Symbol <select value={symbol} onChange={(e) => setSymbol(e.target.value)}>
+          <label>{t('common.symbol')} <select value={symbol} onChange={(e) => setSymbol(e.target.value)}>
             {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
           </select></label>
-          <button className="btn secondary small" onClick={() => { sig.reload(); syn.reload() }}>Lam moi</button>
+          <button className="btn secondary small" onClick={() => { sig.reload(); syn.reload() }}>{t('common.refresh')}</button>
         </div>
       </div>
 
       <div className="card">
-        <h2>Bieu do nen — {symbol}</h2>
+        <h2>{t('sig.chart', { symbol })}</h2>
         <CandleChart symbol={symbol} />
       </div>
 
       <div className="card">
-        <h2>Tin hieu ky thuat (TA)</h2>
-        {sig.loading ? <Loading /> : sig.error || !sig.data ? <Err message={sig.error ?? 'Khong co du lieu'} onRetry={sig.reload} />
-          : sig.data.signals.length === 0 ? <Empty text="Chua co tin hieu cho desk nay" /> : (
+        <h2>{t('sig.ta')}</h2>
+        {sig.loading ? <Loading /> : sig.error || !sig.data ? <Err message={sig.error ?? t('common.empty')} onRetry={sig.reload} />
+          : sig.data.signals.length === 0 ? <Empty text={t('sig.taEmpty')} /> : (
           <div className="grid">{sig.data.signals.map((s) => (
             <div key={s.symbol} className="card" style={{ marginBottom: 0, cursor: 'pointer' }} onClick={() => setSymbol(s.symbol)}>
               <h3>{s.symbol}</h3>
@@ -47,16 +49,16 @@ export default function Signals() {
               <p>RSI: {fmtNum(s.rsi, 1)}</p>
               <p>ATR: {fmtNum(s.atr, 4)}</p>
               <p className="muted small">Regime: {s.regime ?? '—'}</p>
-              <p className="small">{s.patterns.length ? s.patterns.join(', ') : 'Khong co pattern'}</p>
+              <p className="small">{s.patterns.length ? s.patterns.join(', ') : t('sig.noPattern')}</p>
             </div>
           ))}</div>)}
       </div>
 
       <div className="card">
-        <h2>Tong hop TA + FA (Yuling)</h2>
-        {syn.loading ? <Loading /> : syn.error || !syn.data ? <Err message={syn.error ?? 'Khong co du lieu'} onRetry={syn.reload} />
-          : syn.data.items.length === 0 ? <Empty text="Chua co tong hop cho desk nay" /> : (
-          <div className="table-wrap"><table><thead><tr><th>Symbol</th><th>TA</th><th>FA</th><th>Do tin cay</th><th>Khuyen nghi</th><th>Size</th><th>Tuoi verdict</th><th>Ly do</th></tr></thead>
+        <h2>{t('sig.synthesis')}</h2>
+        {syn.loading ? <Loading /> : syn.error || !syn.data ? <Err message={syn.error ?? t('common.empty')} onRetry={syn.reload} />
+          : syn.data.items.length === 0 ? <Empty text={t('sig.synEmpty')} /> : (
+          <div className="table-wrap"><table><thead><tr><th>{t('common.symbol')}</th><th>{t('sig.thTa')}</th><th>{t('sig.thFa')}</th><th>{t('sig.thConfidence')}</th><th>{t('sig.thRecommendation')}</th><th>{t('sig.thSize')}</th><th>{t('sig.thVerdictAge')}</th><th>{t('act.thReason')}</th></tr></thead>
           <tbody>{syn.data.items.map((it, i) => (
             <tr key={i}><td>{it.symbol}</td><td>{it.ta_action}</td><td>{it.fa_direction ?? '—'}</td>
             <td>{it.fa_confidence === null ? '—' : `${(it.fa_confidence * 100).toFixed(0)}%`}</td>

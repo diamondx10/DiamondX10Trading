@@ -421,6 +421,7 @@ def test_recommend_cycle_alert_has_keyboard(tmp_decisions):
 
 def test_maybe_send_alert_recommended_old_style_callable(tmp_decisions):
     cfg = load_config()
+    cfg["language"] = "en"
     cfg["telegram"] = {"enabled": True, "chat_id": "123"}
     sent = []
     result = {"symbol": "EURUSD", "action": "BUY", "status": "RECOMMENDED",
@@ -540,6 +541,7 @@ def test_recommend_alert_real_http_carries_keyboard(monkeypatch,
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     monkeypatch.setenv("DIAMONDX10_TELEGRAM_TOKEN", "fake-token-xyz")
     cfg = load_config()
+    cfg["language"] = "en"
     cfg["telegram"] = {"enabled": True, "chat_id": "123",
                        "bot_token_env": "DIAMONDX10_TELEGRAM_TOKEN"}
     result = {"symbol": "EURUSD", "action": "BUY", "status": "RECOMMENDED",

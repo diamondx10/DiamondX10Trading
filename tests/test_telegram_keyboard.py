@@ -66,7 +66,7 @@ def _result():
 # --- send_message + reply_markup --------------------------------------
 def test_send_message_with_reply_markup(monkeypatch):
     seen = _capture_urlopen(monkeypatch)
-    kb = order_keyboard("abcdef01", "BUY", "EURUSD", 0.01)
+    kb = order_keyboard("abcdef01", "BUY", "EURUSD", 0.01, lang="en")
     assert send_message("hello", token="tok123", chat_id="456",
                         reply_markup=kb) is True
     payload = _payload(seen)
@@ -83,7 +83,7 @@ def test_send_message_without_reply_markup_unchanged(monkeypatch):
 
 # --- order_keyboard ----------------------------------------------------
 def test_order_keyboard_shape():
-    kb = order_keyboard("abcdef01", "BUY", "EURUSD", 0.01)
+    kb = order_keyboard("abcdef01", "BUY", "EURUSD", 0.01, lang="en")
     assert kb == {
         "inline_keyboard": [
             [{"text": "✅ Place BUY EURUSD 0.01 lot",
@@ -93,12 +93,12 @@ def test_order_keyboard_shape():
 
 
 def test_order_keyboard_sell_and_volume_format():
-    kb = order_keyboard("1234abcd", "SELL", "XAUUSD", 0.1)
+    kb = order_keyboard("1234abcd", "SELL", "XAUUSD", 0.1, lang="en")
     button = kb["inline_keyboard"][0][0]
     assert button["text"] == "✅ Place SELL XAUUSD 0.1 lot"
     assert button["callback_data"] == "ord:1234abcd"
     # Volume 1.0 khong de so 0 thua, khong de dang float dai
-    kb2 = order_keyboard("1234abcd", "BUY", "BTCUSD", 1.0)
+    kb2 = order_keyboard("1234abcd", "BUY", "BTCUSD", 1.0, lang="en")
     assert kb2["inline_keyboard"][0][0]["text"] == (
         "✅ Place BUY BTCUSD 1 lot")
 
@@ -112,7 +112,7 @@ def test_callback_data_length_within_telegram_limit():
 # --- format_signal_alert recommended -----------------------------------
 def test_format_signal_alert_recommended():
     text = format_signal_alert(_result(), "forex", manager="Yuling",
-                               recommended=True, pending_id="abcdef01")
+                               recommended=True, pending_id="abcdef01", lang="en")
     assert "Not placed yet — tap the button to place the order" in text
     assert "Pending order ID: abcdef01" in text
     assert "EURUSD" in text and "BUY" in text
@@ -121,14 +121,14 @@ def test_format_signal_alert_recommended():
 
 
 def test_format_signal_alert_not_recommended_unchanged():
-    text = format_signal_alert(_result(), "forex", manager="Yuling")
+    text = format_signal_alert(_result(), "forex", manager="Yuling", lang="en")
     assert "Not placed yet" not in text
     assert "Pending order ID" not in text
     assert "EURUSD" in text
 
 
 def test_format_signal_alert_recommended_without_pending_id():
-    text = format_signal_alert(_result(), "forex", recommended=True)
+    text = format_signal_alert(_result(), "forex", recommended=True, lang="en")
     assert "Not placed yet" in text
     assert "Pending order ID" not in text
 
@@ -160,7 +160,7 @@ def test_answer_callback_query_error_returns_false(monkeypatch):
 # --- edit_message_text --------------------------------------------------
 def test_edit_message_text(monkeypatch):
     seen = _capture_urlopen(monkeypatch)
-    kb = order_keyboard("abcdef01", "BUY", "EURUSD", 0.01)
+    kb = order_keyboard("abcdef01", "BUY", "EURUSD", 0.01, lang="en")
     assert edit_message_text("456", 789, "text moi", reply_markup=kb,
                              token="tok123") is True
     req = seen["requests"][0]
@@ -189,7 +189,7 @@ def test_edit_message_text_error_returns_false(monkeypatch):
 # --- edit_message_reply_markup ------------------------------------------
 def test_edit_message_reply_markup_with_keyboard(monkeypatch):
     seen = _capture_urlopen(monkeypatch)
-    kb = order_keyboard("abcdef01", "BUY", "EURUSD", 0.01)
+    kb = order_keyboard("abcdef01", "BUY", "EURUSD", 0.01, lang="en")
     assert edit_message_reply_markup("456", 789, kb,
                                      token="tok123") is True
     req = seen["requests"][0]

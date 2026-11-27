@@ -93,7 +93,8 @@ def cmd_telegram_test(cfg):
               "truong DIAMONDX10_TELEGRAM_TOKEN, dien chat_id vao "
               "config.yaml local, bat telegram.enabled: true).")
         return 1
-    ok = telegram_mod.send_message(telegram_mod.format_test_message(), cfg=cfg)
+    ok = telegram_mod.send_message(
+        telegram_mod.format_test_message(cfg=cfg), cfg=cfg)
     if ok:
         print("OK: tin nhan thu da gui toi Telegram — kiem tra chat nhan "
               "khuyen nghi.")
