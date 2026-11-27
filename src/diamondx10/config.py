@@ -25,6 +25,7 @@ DEFAULT = {
                  "rsi_extreme_high": 80, "rsi_extreme_low": 20,
                  "atr_period": 14, "atr_sl_mult": 1.5,
                  "tp_mult": 2.0, "trail_mult": 1.5,
+                 "adx_min": 0,
                  "desks": {"crypto": {"atr_sl_mult": 2.0,
                                       "trail_mult": 2.0}}},
     "data": {"provider": "simulated"},
@@ -55,6 +56,11 @@ def load_config(path=None):
         return DEFAULT
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
+    # Quy tac cung: bat ky khoa cung nao duoi strategy: deu bao loi
+    # LOUD ngay khi load config (xem strategies/soft_rules.py).
+    if isinstance(data.get("strategy"), dict):
+        from .strategies.soft_rules import check_hard_rule_keys
+        check_hard_rule_keys(data["strategy"])
     merged = dict(DEFAULT)
     merged.update(data)
     return merged

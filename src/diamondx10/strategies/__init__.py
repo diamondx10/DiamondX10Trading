@@ -10,12 +10,24 @@ dong thoi re-export cac ham moi cua registry.
 from .base import Strategy
 from .registry import (
     DESK_STRATEGY_CLASSES,
+    HARD_RULE_KEYS,
     STRATEGY_REGISTRY,
     build_strategy_for_symbol,
+    check_hard_rule_keys,
     get_strategy,
     list_strategies,
+    resolve_soft_rules,
     resolve_strategy_params,
+    validate_soft_rules,
     validate_strategy_params,
+)
+from .soft_rules import (
+    CONDITION_TYPES,
+    KNOWN_DESKS,
+    KNOWN_PATTERN_NAMES,
+    KNOWN_SYMBOLS,
+    apply_soft_rules,
+    evaluate_condition,
 )
 
 _STRATEGY_CLASSES = DESK_STRATEGY_CLASSES
@@ -36,15 +48,25 @@ def build_strategies(strategy_cfg=None):
     Khoa "per_symbol" (neu co) KHONG ap o day — build_strategies tra
     ve 1 instance/desk, khong phan biet symbol; dung
     build_strategy(desk, symbol=..., cfg=...) de lay instance theo
-    symbol (tham so rieng symbol thang cao nhat).
+    symbol (tham so rieng symbol thang cao nhat). Tuong tu, soft rule
+    scope=symbol KHONG gan o day; rule khong scope + rule scope=desk
+    thi co gan theo tung desk.
     """
     cfg = dict(strategy_cfg or {})
-    shared = {k: v for k, v in cfg.items() if k not in ("desks", "per_symbol")}
+    check_hard_rule_keys(cfg)
+    shared = {k: v for k, v in cfg.items()
+              if k not in ("desks", "per_symbol", "soft_rules")}
     per_desk = dict(cfg.get("desks") or {})
     built = {}
     for desk, cls in _STRATEGY_CLASSES.items():
+        # Soft rule theo desk: rule khong scope + rule scope=desk;
+        # rule scope=symbol KHONG gan o day (khong biet symbol) —
+        # dung build_strategy(desk, symbol=..., cfg=...) de lay
+        # instance theo symbol day du ca rule scope-symbol.
+        soft = resolve_soft_rules({"strategy": cfg}, desk, None)
         built[desk] = cls(params=shared,
-                          desk_params=per_desk.get(desk) or {})
+                          desk_params=per_desk.get(desk) or {},
+                          soft_rules=soft)
     return built
 
 
@@ -73,4 +95,8 @@ def build_strategy(desk, symbol=None, cfg=None, strategy_cfg=None,
 __all__ = ["Strategy", "STRATEGIES", "build_strategies", "build_strategy",
            "STRATEGY_REGISTRY", "get_strategy", "list_strategies",
            "resolve_strategy_params", "validate_strategy_params",
-           "build_strategy_for_symbol"]
+           "build_strategy_for_symbol", "HARD_RULE_KEYS",
+           "check_hard_rule_keys", "validate_soft_rules",
+           "resolve_soft_rules", "evaluate_condition", "apply_soft_rules",
+           "CONDITION_TYPES", "KNOWN_DESKS", "KNOWN_SYMBOLS",
+           "KNOWN_PATTERN_NAMES"]

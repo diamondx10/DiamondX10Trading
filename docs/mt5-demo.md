@@ -36,7 +36,11 @@ moi truong (setx) tren Windows — cac lan chay sau khong can nhap lai
 
 Script chay theo thu tu: **chuan bi xong moi hoi dang nhap**.
 0. Kiem tra Python >= 3.10. 1. Tu dong cai `requirements.txt` +
-`MetaTrader5` (cai loi thi dung ngay). 2. **Tu dong quet tim MT5
+`MetaTrader5` (cai loi thi dung ngay) va kiem tra/cai
+Playwright + Chromium cho Muse neu chua co (chi cai khi thieu,
+da co thi bo qua; cai loi chi canh bao roi chay tiep — Muse la
+tuy chon; `--skip-muse-setup` de bo qua muc nay, xem
+`docs/muse-browser.md` §1). 2. **Tu dong quet tim MT5
 terminal roi kiem tra noi duoc khong** (`mt5.initialize(path=...)`);
 terminal chua cai / chua mo thi dung ngay va huong dan cai/mo — chua
 hoi gi ve tai khoan. Thu tu tim terminal: (1) bien moi truong
@@ -71,6 +75,9 @@ Cac che do them:
 python quickstart.py --check-only   # chi buoc 0-2: cai goi + kiem tra
                                     # terminal, khong hoi dang nhap
 python quickstart.py --skip-install # bo qua buoc cai goi pip
+python quickstart.py --skip-muse-setup # bo qua kiem tra/cai
+                                    # Playwright/Chromium cho Muse
+                                    # o buoc 1 (Muse la tuy chon)
 python quickstart.py --trade        # sau dry-run, go ro "dat lenh"
                                     # moi dat lenh DEMO
 python quickstart.py --live-once    # sau dry-run, go ro "chay live"

@@ -689,3 +689,109 @@ def test_main_step5_real_mt5feed_trial_only_m(monkeypatch, tmp_path, capsys):
     assert "[co] XAUUSD -> XAUUSDm (desk xauusd)" in out
     assert "[co] BTCUSD -> BTCUSDm (desk crypto)" in out
     assert "[co] NVDA -> NVDAm (desk us_securities)" in out
+
+# --- Buoc 1: tu dong cai Playwright/Chromium cho Muse -------------------
+# Seam: main() --check-only chi chay buoc 0-2 roi tra 0, khong hoi
+# dang nhap — du de kiem tra day noi buoc 1 ma khong chay het main().
+
+
+def _fake_muse_ensure(calls, result=True):
+    """Ban ghi cho qs._ensure_muse_browser: ghi so lan goi, tra result."""
+
+    def fake():
+        calls.append(True)
+        return result
+
+    return fake
+
+
+def _setup_check_only(monkeypatch, tmp_path, muse_calls, muse_result=True):
+    """Gia lap buoc 1-2 cho main(["--check-only", ...])."""
+    monkeypatch.setattr(qs, "ROOT", tmp_path)
+    monkeypatch.setattr(qs, "_pip_install", lambda *a, **k: True)
+    monkeypatch.setattr(qs, "_ensure_pip", lambda: None)
+    monkeypatch.setattr(qs, "_ensure_muse_browser",
+                        _fake_muse_ensure(muse_calls, muse_result))
+    monkeypatch.setattr(qs, "check_terminal",
+                        lambda mt5_module=None, path=None: (True, "ok"))
+    monkeypatch.setattr(qs, "resolve_mt5_terminal_path",
+                        lambda cfg=None: None)
+
+
+def test_step1_calls_muse_setup_when_not_skipped(monkeypatch, tmp_path,
+                                                 capsys):
+    """Mac dinh: buoc 1 goi kiem tra/cai Muse 1 lan, chay tiep den het
+    --check-only (rc 0)."""
+    calls = []
+    _setup_check_only(monkeypatch, tmp_path, calls)
+    rc = qs.main(["--check-only"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert len(calls) == 1
+    assert "[1/8] Cai cac goi can thiet" in out
+    assert "May da SAN SANG" in out
+
+
+def test_step1_skip_muse_setup_flag(monkeypatch, tmp_path, capsys):
+    """--skip-muse-setup ton tai trong argparse va bo qua hoan toan
+    buoc kiem tra/cai Muse (fake khong duoc goi lan nao)."""
+    calls = []
+    _setup_check_only(monkeypatch, tmp_path, calls)
+    rc = qs.main(["--check-only", "--skip-muse-setup"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert calls == []
+    assert "Bo qua kiem tra Muse (--skip-muse-setup)." in out
+
+
+def test_step1_skip_install_skips_muse_check_too(monkeypatch, tmp_path,
+                                                 capsys):
+    """--skip-install bo qua ca buoc cai goi, ke ca muc kiem tra Muse."""
+    calls = []
+    _setup_check_only(monkeypatch, tmp_path, calls)
+    rc = qs.main(["--check-only", "--skip-install"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert calls == []
+    assert "Bo qua buoc cai goi (--skip-install)." in out
+
+
+def test_ensure_muse_browser_ready_true(monkeypatch, capsys):
+    """Helper buoc 1: ensure tra True -> tra True, khong canh bao."""
+    import diamondx10.muse_browser as muse_browser_mod
+
+    monkeypatch.setattr(muse_browser_mod, "ensure_muse_browser_ready",
+                        lambda *a, **k: True)
+    assert qs._ensure_muse_browser() is True
+    assert capsys.readouterr().out == ""
+
+
+def test_ensure_muse_browser_failure_warns_and_continues(monkeypatch,
+                                                          capsys):
+    """Helper buoc 1: cai loi (ensure tra False) -> canh bao ro lenh
+    cai tay `python -m diamondx10 muse-setup`, tra False, KHONG raise
+    (Muse la tuy chon — buoc 1 khong dung chay)."""
+    import diamondx10.muse_browser as muse_browser_mod
+
+    monkeypatch.setattr(muse_browser_mod, "ensure_muse_browser_ready",
+                        lambda *a, **k: False)
+    assert qs._ensure_muse_browser() is False
+    out = capsys.readouterr().out
+    assert "python -m diamondx10 muse-setup" in out
+    assert "Muse la tuy chon" in out
+
+
+def test_ensure_muse_browser_exception_warns_and_continues(monkeypatch,
+                                                            capsys):
+    """Helper buoc 1: ensure raise loi bat ngo -> cung chi canh bao
+    lenh cai tay roi tra False, KHONG raise."""
+    import diamondx10.muse_browser as muse_browser_mod
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("loi cai dat gia")
+
+    monkeypatch.setattr(muse_browser_mod, "ensure_muse_browser_ready",
+                        _boom)
+    assert qs._ensure_muse_browser() is False
+    out = capsys.readouterr().out
+    assert "python -m diamondx10 muse-setup" in out

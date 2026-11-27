@@ -781,6 +781,114 @@
     briefing cho Muse — Telegram chi di qua duong dang bai /
     verdict hien co (chuan 0.6, quy tac 58; che do TEST thi moi
     tin deu danh dau [TEST], quy tac 59).
+61. **[ĐÃ CÓ — 2026-11-27] Tham so TA rieng theo symbol
+    (bang `strategy.per_symbol`)** (`strategies/registry.py`
+    `resolve_strategy_params`, `strategies/base.py` gate
+    ADX/ATR%, xem `docs/per-symbol-ta.md`): quy tac tin hieu
+    chung (muc 4) khong doi — chi tinh chinh con so theo
+    symbol, thu tu uu tien mac dinh < chung < desk < symbol.
+    Bang da chot trong `config.example.yaml`: EURUSD SMA 8/21
+    + ADX >= 20; XAUUSD SMA 10/30, RSI 55–75/25–45, cuc doan
+    85/15, SL 2,0 x ATR, TP 1,5 x, ADX >= 30; BTCUSD SMA 9/21,
+    RSI 55–75/25–45, cuc doan 85/15, SL 2,0 x ATR, ADX >= 25;
+    ETHUSD giong BTC nhung TP 1,5 x; BNBUSD SMA 10/30,
+    ADX >= 20; AMD SMA 8/21, RSI 55–75/25–45, cuc doan 85/15,
+    ADX >= 20; NVDA SMA 9/21, RSI 55–75/25–45, cuc doan 85/15,
+    SL 2,0 x ATR, ADX >= 25; INTC SMA 10/30, chi mua duoi RSI
+    65 / chi ban tren RSI 35, SL 2,0 x ATR, TP 1,5 x,
+    ADX >= 20; CDNS/SNPS khong ghi de — giu mac dinh chung.
+    Hai gate moi theo tham so, ap truoc khi tra BUY/SELL:
+    `adx_min` > 0 thi ADX(14) < `adx_min` → HOLD; `min_atr_pct`
+    > 0 thi ATR(14)/gia < `min_atr_pct` → HOLD; gia tri 0
+    nghia la gate tat (hanh vi cu); ADX khong tinh duoc thi
+    gate cho qua. **Honest limit:** bang nay la diem xuat
+    phat theo tai lieu / thuc hanh, KHONG phai bang chung sinh
+    loi; nguong `min_atr_pct` va gate ADX lay tu khoang dien
+    hinh da cong bo, chua kiem chung tren chinh symbol cua
+    dx10. Kiem chung that can backfill MT5 tren Windows +
+    walk-forward compare/sweep xep hang OOS, ~50–100 lenh/
+    symbol; neu walk-forward cho thay mac dinh chung thang
+    ghi de rieng symbol thi GIU MAC DINH.
+62. **[ĐÃ CÓ — 2026-11-27] Mo hinh quy tac cung / quy tac mem
+    cho TA** (`strategies/soft_rules.py`, xem
+    `docs/per-symbol-ta.md` §3–§4): **quy tac cung (hard
+    rules)** — rui ro/von/drawdown, kill switch/demo-only/
+    gioi han lenh, `no_trade_events`, PTCB/tong hop Yuling,
+    lenh cho Telegram (danh sach khoa day du trong
+    `HARD_RULE_KEYS`) — khong bao gio ghi de duoc tu muc
+    `strategy:`; gap khoa cung o bat ky cap nao duoi
+    `strategy:` thi bao loi LOUD ngay luc load config va luc
+    resolve, neu ro ten khoa. **Quy tac mem (soft rules)** —
+    danh sach `strategy.soft_rules`, moi rule co `name` duy
+    nhat, `scope` tuy chon (bo qua = moi symbol, hoac
+    `{desk: ...}`, hoac `{symbol: ...}`), `condition` v1
+    (`rsi_range`, `sma_cross`, `adx_min`/`adx_max`,
+    `atr_pct_min`/`atr_pct_max`, `pattern`), `effect`
+    `block` / `require` / `{type: scale, factor: 0<x<=1}`.
+    Soft rule chi duoc: chan tin hieu BUY/SELL thanh HOLD,
+    hoac giam size (khong bao gio tang size, khong doi % rui
+    ro, khong bo qua bat ky gate cung nao, khong tao lenh khi
+    PTKT la HOLD). Danh gia o 1 diem duy nhat
+    (`Strategy.signal` qua `_apply_soft_rules` — Donchian
+    dung chung) nen live, backtest, compare/sweep va signals
+    deu thay soft rule; size sau scale nam trong
+    `levels["size_scale"]`, live nhan volume theo do (lam
+    tron xuong buoc 0,01 lot; volume truyen tay khong bi
+    scale), backtest nhan units theo do. Rule go sai bao loi
+    LOUD luc resolve (loai condition khong biet, vuot khoang,
+    trung ten, scope sai, `factor` ngoai (0, 1], khoa khong
+    biet, khoa cung lan trong rule) — khong bao gio lang le
+    khong lam gi. **Khong co** condition cua so thoi gian /
+    phien o v1 (bar time khong phai moc dang tin cay chung);
+    loc phien / earnings blackout van dung co che cung
+    `no_trade_events`.
+63. **[ĐÃ CÓ — 2026-11-27] Vong hoc TA: ghi lai — cham diem —
+    xem xet — de xuat — kiem dinh OOS, khong bao gio tu ap**
+    (`src/diamondx10/outcomes.py`, `evaluator.py`, `ta_review.py`,
+    lenh `evaluate-signals` / `ta-review`, xem
+    `docs/ta-learning-loop.md`): moi khuyen nghi BUY/SELL vuot
+    qua moi gate (TRADED hoac RECOMMENDED) duoc ghi 1 dong JSON
+    vao `decisions/signal-outcomes.jsonl` kem day du boi canh
+    (RSI/SMA/ATR/regime/ADX/mau hinh/tham so da resolve/soft rule
+    da kich hoat/PTCB/`params_hash`); `evaluate-signals` cham
+    tung ban ghi bang nen M15 that trong kho lich su (khong goi
+    MT5 live, khong dung gia mo phong): TP cham truoc la win, SL
+    cham truoc la loss, het `learning.outcome_window_bars` nen
+    (mac dinh 20 nen M15 = 5 gio) ma khong cham cai nao la timeout
+    (cham bang loi/nhuan luc dong cua so), kem `bars_held` / MFE /
+    MAE / `ret`, ghi vao
+    `decisions/signal-outcomes-evaluated.jsonl`; `ta-review` tong
+    ket theo symbol / chien luoc / soft rule / PTCB / regime, lat
+    cat nao duoi `learning.min_sample_for_proposal` mau (mac dinh
+    20) thi bao "chua du mau" va khong de xuat gi, de xuat ghi vao
+    `decisions/ta-tuning-proposals-<YYYYMMDD-HHMM>.yaml` voi
+    `validated: false` cho den khi thang walk-forward OOS; de xuat
+    chi ap bang `ta-review --apply <file>` co xac nhan go chu
+    "APPLY" cua Phu — vong hoc khong tu doi bat ky tham so nao.
+    **Kiem chung end-to-end:** `tests/test_learning_loop_e2e.py`
+    (4 ban ghi gia: win + loss + timeout, de xuat `validated:
+    false` khi chua co lich su OOS).
+64. **[ĐÃ CÓ — 2026-11-27] Phan tich ky thuat da khung thoi gian
+    (HTF trend + M15 entry)** (`src/diamondx10/multitimeframe.py`,
+    `src/diamondx10/data/multitimeframe.py`, xem
+    `docs/multi-timeframe-ta.md`): stack v1 xu huong H1 + entry M15
+    (timing M5 NGOAI v1, H4 NGOAI v1); khung cao hon dat huong cho
+    phep — tin hieu M15 nguoc xu huong H1 manh (SMA nhanh > SMA cham
+    + ADX(14) >= `timeframes.htf_adx_min`, mac dinh 20) thanh HOLD
+    (levels None, ghi chu HTF trong reason); trend trung lap thi cho
+    phep; ADX H1 thap / thieu du lieu H1 thi loc KHONG ap dung — tin
+    hieu M15 chay tiep kem ghi chu, khong bao gio crash chu ky. Do
+    dai SMA cua trend lay tu tham so per-symbol da resolve (ghi de
+    qua `strategy.per_symbol` nhu cu, khong co he ghi de rieng).
+    Boi canh HTF (`timeframe/direction/adx/trusted/agreement`) ghi
+    vao outcome log de `ta-review` lat cat theo dong thuan HTF.
+    Backtest/compare/sweep doc bar trend tu kho lich su khi co;
+    thieu bar trend thi chay M15-only kem canh bao. Thieu muc
+    `timeframes:` trong config thi M15-only nhu cu. **Honest limit:**
+    loc giam so lenh va co the bo lo dao chieu dung — chua kiem chung
+    tren thi truong that; can walk-forward theo tung symbol (co loc /
+    khong loc, OOS) truoc khi tin, neu khong cai thien expectancy thi
+    tat loc.
 
 ## 8. Những điểm đang lệch giữa nghiên cứu và code
 
@@ -833,6 +941,39 @@
   `news.auto_fetch_interval_min`, mặc định tắt / 5 phút, vòng nền trong
   server, không bao giờ tự gửi Telegram) (mục 59–60); xem
   `docs/web-ui.md` §7, §9.
+- [x] Tham số TA riêng theo symbol + gate ADX/ATR% — xong 2026-11-27:
+  bảng `strategy.per_symbol` cho 8/10 symbol (CDNS/SNPS giữ mặc định
+  chung), thứ tự ưu tiên mặc định < chung < desk < symbol, gate
+  `adx_min` / `min_atr_pct` trong đường signal (mục 61); xem
+  `docs/per-symbol-ta.md` §1–§2. Giới hạn: điểm xuất phát theo tài
+  liệu/thực hành, chưa kiểm chứng trên chính symbol của dx10 — kiểm
+  chứng thật cần backfill MT5 + walk-forward OOS, ~50–100 lệnh/symbol.
+- [x] Mô hình quy tắc cứng / quy tắc mềm cho TA — xong 2026-11-27:
+  khóa cứng (`HARD_RULE_KEYS`) không ghi đè được từ mục `strategy:`,
+  soft rule `block` / `require` / `scale` (chỉ giảm size) với condition
+  v1, đánh giá ở 1 điểm duy nhất trong `Strategy.signal`, rule gõ sai
+  báo lỗi LOUD lúc resolve (mục 62); xem `docs/per-symbol-ta.md`
+  §3–§4. Không có condition cửa sổ thời gian/phiên ở v1.
+- [x] Vòng học TA — xong 2026-11-27: ghi log khuyen nghi
+  (`outcomes.py`) + chấm điểm bằng nến M15 thật (`evaluator.py`,
+  `evaluate-signals`) + review/de xuat (`ta_review.py`,
+  `ta-review`, `ta-review --apply <file>` go chu APPLY) (mục 63);
+  kiểm chứng end-to-end bằng `tests/test_learning_loop_e2e.py`
+  (win + loss + timeout, de xuat `validated: false` khi chua co
+  lich su OOS); xem `docs/ta-learning-loop.md`. Chưa kiểm chứng
+  trên máy Windows có MT5 demo (backfill + vòng live thật).
+- [x] Phân tích kỹ thuật đa khung thời gian — xong 2026-11-27:
+  stack v1 xu huong H1 + entry M15 (timing M5 NGOAI v1, H4 NGOAI
+  v1); khung cao hon dat huong cho phep, khung thap hon cho diem
+  vao; tin hieu M15 nguoc xu huong H1 manh (ADX >= 20) thanh HOLD
+  (levels None, ghi chu HTF trong reason); ADX H1 thap / thieu du
+  lieu H1 / trend trung lap thi loc KHONG ap dung — tin hieu M15
+  chay tiep kem ghi chu (mục 64); xem `docs/multi-timeframe-ta.md`.
+  Thieu muc `timeframes:` trong config thi M15-only nhu cu.
+  Chua kiem chung tren thi truong that: loc giam so lenh va co the
+  bo lo dao chieu dung — can walk-forward theo tung symbol (co loc
+  / khong loc, OOS) truoc khi tin; neu khong cai thien expectancy
+  thi tat loc.
 - [ ] Theo dõi: hạ rủi ro desk vàng xuống 2–3% — chỉ quyết sau khi có số ATR thật từ MT5 demo (mục 8).
 - [ ] **Giới hạn rủi ro toàn quỹ — các con số mặc định Phase F (mục 33): lỗ trong ngày 3% vốn quỹ, tối đa 10 vị thế mở toàn quỹ, tối đa 2 vị thế mở/desk — cần Phu duyệt (giữ nguyên, tăng hay giảm).**
 - [ ] Donchian breakout có dùng cho đường live không — cần Phu duyệt + bằng chứng walk-forward (mục 23).
@@ -854,6 +995,9 @@
 - `config.example.yaml` — mọi con số rủi ro/vốn (mức chung 1%/lệnh, riêng EURUSD 3% / XAUUSD 10% / BTCUSD 8%, TP/SL 5%, drawdown 10%, 2.500 USD/desk).
 - `docs/backtest.md` — engine backtest, walk-forward, VaR/CVaR, so sánh chiến lược, sweep tham số.
 - `docs/strategy-engine.md` — registry chiến lược, tham số riêng theo symbol, walk-forward + so sánh + sweep, cảnh báo overfitting (Phase B).
+- `docs/per-symbol-ta.md` — bảng tham số TA riêng theo symbol, mô hình quy tắc cứng/mềm, schema `soft_rules` + ví dụ (mục 61–62).
+- `docs/ta-learning-loop.md` — vòng học TA: ghi log khuyen nghi, cham diem bang nen M15 that, bao cao bai hoc + de xuat tinh chinh, kiem dinh OOS truoc khi ap tay (mục 63).
+- `docs/multi-timeframe-ta.md` — phân tích kỹ thuật đa khung thời gian: xu hướng H1 + entry M15, bảng cho phép/chặn, suy giảm khi thiếu dữ liệu H1, bối cảnh htf trong outcome log (mục 64).
 - `docs/market-news.md` — nguồn tin thị trường theo desk, phân tầng độ tin cậy.
 - `docs/analysis-workflow.md` — quy trình phân tích PTKT + PTCB + tổng hợp Yuling (mục 37–40).
 - `docs/muse-browser.md` — gửi briefing cho Muse bằng trình duyệt tự động, chờ verdict, chu kỳ tự động `muse-auto` (mục 45–46, 49).

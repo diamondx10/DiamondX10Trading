@@ -29,13 +29,17 @@ class DonchianBreakout(Strategy):
     desk = ""
     DESK_OVERRIDES = {}
 
-    def __init__(self, params=None, desk_params=None):
-        super().__init__(params=params, desk_params=desk_params)
+    def __init__(self, params=None, desk_params=None, soft_rules=None):
+        super().__init__(params=params, desk_params=desk_params,
+                         soft_rules=soft_rules)
         self.params.setdefault("donchian_period", 20)
         # ATR toi thieu so voi gia (0,3%): duoi muc nay thi HOLD.
         self.params.setdefault("min_atr_pct", 0.003)
 
     def signal(self, bars):
+        # Reset truoc (xem Strategy.signal): HOLD dung som khong duoc
+        # mang context cua lan tinh truoc.
+        self.last_context = None
         closes = [b["close"] for b in bars]
         highs = [b["high"] for b in bars]
         lows = [b["low"] for b in bars]
@@ -60,14 +64,22 @@ class DonchianBreakout(Strategy):
                     f"{self._p('min_atr_pct')} — bien dong qua thap, "
                     "khong mo lenh breakout",
                     None)
+        ctx = self._soft_context(bars, atr_val, entry)
+        gate_reason = self._param_gate_hold(ctx)
+        if gate_reason is not None:
+            return "HOLD", gate_reason, None
         if entry >= don_high:
             reason = (f"gia dong cua ({entry:.4f}) pha tren dinh Donchian "
                       f"{period} ({don_high:.4f})")
-            return "BUY", reason, self.levels_for_entry("BUY", entry, atr_val)
+            return self._apply_soft_rules(
+                "BUY", reason,
+                self.levels_for_entry("BUY", entry, atr_val), ctx)
         if entry <= don_low:
             reason = (f"gia dong cua ({entry:.4f}) pha duoi day Donchian "
                       f"{period} ({don_low:.4f})")
-            return "SELL", reason, self.levels_for_entry("SELL", entry, atr_val)
+            return self._apply_soft_rules(
+                "SELL", reason,
+                self.levels_for_entry("SELL", entry, atr_val), ctx)
         return ("HOLD",
                 f"gia ({entry:.4f}) trong kenh Donchian {period} "
                 f"[{don_low:.4f}, {don_high:.4f}]",

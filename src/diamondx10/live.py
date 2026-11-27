@@ -12,10 +12,12 @@ moi/symbol/ngay, drawdown quy 10% + canh bao desk 5%, no-trade windows,
 crypto cap USD, MT5 cho tat ca (khong Binance). Loi 1 symbol khong crash
 ca chu ky; loi lay feed thi ghi log + bo qua symbol/chu ky do.
 """
+import math
 import time
 from datetime import datetime, timezone
 
 from . import audit as audit_mod
+from . import outcomes as outcomes_mod
 from . import telegram as telegram_mod
 from .data.providers import build_feed
 from .decisions import (
@@ -32,6 +34,7 @@ from .execution import (
     position_size_lots,
 )
 from .killswitch import is_engaged, status as kill_switch_status
+from .multitimeframe import compute_htf_trend, resolve_timeframes
 from .portfolio import Portfolio
 from .positions import new_position, realize_deals, reconcile_positions
 from .risk import (
@@ -62,6 +65,22 @@ def _recommend_mode(cfg, recommend_only=False):
         return True
     return bool(((cfg or {}).get("trading") or {}).get(
         "require_confirmation", False))
+
+
+def _log_outcome(result, sig, cfg, desk, symbol, outcome_store=None):
+    """Ghi 1 ban ghi outcome cho tin hieu TRADED/RECOMMENDED.
+
+    Goi TRUOC khi tra ket qua ve cho run_live_cycle (noi gui canh bao
+    Telegram sau) — log-first. KHONG BAO GIO raise: loi ghi log chi
+    canh bao trong outcomes, vong live chay tiep.
+    outcome_store: duong dan file JSONL (de test); None thi dung
+    decisions/signal-outcomes.jsonl mac dinh.
+    """
+    try:
+        record = outcomes_mod.build_record(result, sig, cfg, desk, symbol)
+        outcomes_mod.log_signal(outcome_store, record)
+    except Exception as exc:  # noqa: BLE001 — ghi log khong duoc crash live
+        print(f"Canh bao outcomes: khong ghi duoc ban ghi {symbol} ({exc})")
 
 
 def _pending_store(pending_store=None):
@@ -109,6 +128,36 @@ def _live_cfg(cfg):
     merged = dict(DEFAULT_LIVE)
     merged.update((cfg or {}).get("live") or {})
     return merged
+
+
+# So phut moi nen theo khung (dung de uoc luong so ngay can lay khi
+# doc nen khung trend qua MT5Feed.bars_for_days).
+_TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "H1": 60, "D1": 1440}
+
+
+def _fetch_trend_bars(feed, trend_tf, n):
+    """Lay n nen khung trend tu feed (MTF v1 — muc 64).
+
+    Tra list bar (co the ngan); tra None khi feed KHONG ho tro lay nen
+    khung khac (vd SimulatedFeed / feed gia chi co bars(n)) — luc do
+    loc HTF tat lang le, chay M15-only nhu cu. Loi lay nen thi tra []
+    (thieu du lieu — loc khong ap dung, chi ghi chu trong reason).
+    """
+    if getattr(feed, "timeframe", None) == trend_tf:
+        try:
+            return list(feed.bars(n))
+        except Exception:  # noqa: BLE001 — thieu du lieu, khong crash
+            return []
+    fn = getattr(feed, "bars_for_days", None)
+    if not callable(fn):
+        return None
+    minutes = _TF_MINUTES.get(trend_tf, 60)
+    days = max(1, math.ceil(n * minutes / 1440) + 2)
+    try:
+        bars = list(fn(timeframe=trend_tf, days=days))
+    except Exception:  # noqa: BLE001 — thieu du lieu, khong crash
+        return []
+    return bars[-n:] if len(bars) > n else bars
 
 
 def _desk_symbols(cfg, desk, symbol=None):
@@ -213,7 +262,8 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
                    manager, guard, positions, volume=None,
                    per_symbol_cap=None, strategies=None, bars=None,
                    now=None, verdict_store=None, recommend_only=False,
-                   pending_store=None):
+                   pending_store=None, outcome_store=None,
+                   htf_bars=None):
     """Xu ly 1 symbol: dung trinh tu gate nhu lenh mt5-trade.
 
     (1) doi chieu vi the mo, (2) chan drawdown, (2b) kill switch,
@@ -239,6 +289,11 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
     (co `live --recommend-only` / `mt5-trade --recommend-only`).
     pending_store: PendingOrderStore truyen vao (de test); khong truyen
     thi tao moi theo duong dan mac dinh.
+    outcome_store: duong dan file JSONL ghi outcome (de test); None
+    thi dung decisions/signal-outcomes.jsonl mac dinh.
+    htf_bars: nen khung trend (vd H1) truyen vao (de test); khong truyen
+    thi tu lay tu feed khi `timeframes.trend_enabled` bat (chi MT5Feed
+    ho tro lay nen khung khac; feed khong ho tro thi loc tat lang le).
     """
     strat = build_strategy(desk, symbol=symbol, cfg=cfg)
     if bars is None:
@@ -256,9 +311,33 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
         print(f"LOI doi chieu vi the ({symbol}): {exc} — bo qua symbol nay.")
         return {"symbol": symbol, "action": "ERROR", "status": "ERROR",
                 "reason": f"doi chieu vi the loi: {exc}"}
+    # (5) Loc xu huong khung cao (MTF v1 — muc 64): xu huong H1 dat
+    # huong cho phep, M15 cho diem vao. htf_bars truyen vao thi dung
+    # truc tiep; khong thi lay tu feed khi trend_enabled bat. Feed
+    # khong ho tro lay nen khung khac (mo phong / gia) thi loc tat
+    # lang le (htf_trend None) — chay M15-only nhu cu. Lay duoc it
+    # nen thi compute_htf_trend tra "unknown" — loc khong ap dung,
+    # chi ghi chu trong reason (kem 1 dong canh bao o day).
+    tf_cfg = resolve_timeframes(cfg)
+    htf_trend = None
+    if htf_bars is not None:
+        htf_trend = compute_htf_trend(
+            htf_bars, cfg, timeframe=tf_cfg["trend"], desk=desk,
+            symbol=symbol)
+    elif tf_cfg["trend_enabled"]:
+        trend_bars = _fetch_trend_bars(
+            feed, tf_cfg["trend"], tf_cfg["trend_bars"])
+        if trend_bars is not None:
+            htf_trend = compute_htf_trend(
+                trend_bars, cfg, timeframe=tf_cfg["trend"], desk=desk,
+                symbol=symbol)
+    if htf_trend is not None and htf_trend["direction"] == "unknown":
+        print(f"Canh bao MTF: thieu nen {tf_cfg['trend']} cho {symbol} "
+              "— chay M15-only (khong ap dung loc HTF).")
     try:
         sig = generate_signals(desk, bars, symbol=symbol, cfg=cfg,
-                               strategies=strategies)
+                               strategies=strategies,
+                               htf_trend=htf_trend)
         entry = feed.latest_price(symbol)
     except Exception as exc:  # noqa: BLE001 — tin hieu/gia loi thi bo symbol
         print(f"LOI tinh tin hieu ({symbol}): {exc}")
@@ -364,6 +443,14 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
     risk_pct = risk_pct_for_symbol(cfg, symbol)
     vol = volume or position_size_lots(
         per_symbol_cap, risk_pct, entry, sl, contract_size=contract)
+    # Soft rule scale: size_scale trong tin hieu (<= 1.0) chi GIAM
+    # volume — lam tron XUONG buoc 0.01 lot nhu position_size_lots.
+    # volume truyen tay (tham so volume) KHONG bi scale: no la ghi de
+    # thu cong cua nguoi chay, khong phai size cung da tinh.
+    size_scale = float((sig.get("levels") or {}).get("size_scale", 1.0)
+                       or 1.0)
+    if volume is None and size_scale < 1.0:
+        vol = int(vol * size_scale * 100) / 100.0
     if vol <= 0:
         print("Volume tinh duoc = 0 — khong dat lenh "
               "(kiem tra risk/entry/SL).")
@@ -390,6 +477,8 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
     # Che do khuyen nghi: moi gate tren da vuot qua giong het duong dat
     # lenh, nhung KHONG goi place_demo_order — tao lenh cho xac nhan.
     risk_usd = round(per_symbol_cap * risk_pct / 100.0, 2)
+    if size_scale < 1.0:
+        risk_usd = round(risk_usd * size_scale, 2)
     when = now or datetime.now(timezone.utc)
     if _recommend_mode(cfg, recommend_only):
         # Gate ky quy (nam trong place_demo_order o duong dat lenh):
@@ -421,12 +510,15 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
         print(f"KHUYEN NGHI: {sig['action']} {symbol} {vol} lot @ "
               f"{entry} (SL {sl}, TP {tp}) — cho xac nhan "
               f"(pending {pending_id}).")
-        return {"symbol": symbol, "action": sig["action"],
-                "status": "RECOMMENDED", "reason": sig["reason"],
-                "volume": vol, "price": entry, "sl": sl, "tp": tp,
-                "risk_usd": risk_usd, "manager": manager,
-                "time": when.isoformat(), "fa_note": fa_note,
-                "pending_id": pending_id}
+        result = {"symbol": symbol, "action": sig["action"],
+                  "status": "RECOMMENDED", "reason": sig["reason"],
+                  "volume": vol, "price": entry, "sl": sl, "tp": tp,
+                  "risk_usd": risk_usd, "manager": manager,
+                  "time": when.isoformat(), "fa_note": fa_note,
+                  "size_scale": size_scale,
+                  "pending_id": pending_id}
+        _log_outcome(result, sig, cfg, desk, symbol, outcome_store)
+        return result
     try:
         result = place_demo_order(
             mt5, symbol=symbol, action=sig["action"], volume=vol,
@@ -450,11 +542,14 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
         desk, symbol, sig["action"], entry, sl, tp, vol,
         contract, sig["levels"]["atr"]))
     print(f"OK: lenh DEMO da gui: {result}")
-    return {"symbol": symbol, "action": sig["action"], "status": "TRADED",
-            "reason": sig["reason"], "volume": vol, "price": entry,
-            "sl": sl, "tp": tp, "order": result.get("order"),
-            "risk_usd": risk_usd, "manager": manager,
-            "time": when.isoformat(), "fa_note": fa_note}
+    outcome = {"symbol": symbol, "action": sig["action"], "status": "TRADED",
+               "reason": sig["reason"], "volume": vol, "price": entry,
+               "sl": sl, "tp": tp, "order": result.get("order"),
+               "risk_usd": risk_usd, "manager": manager,
+               "time": when.isoformat(), "fa_note": fa_note,
+               "size_scale": size_scale}
+    _log_outcome(outcome, sig, cfg, desk, symbol, outcome_store)
+    return outcome
 
 
 def _close_feed(feed):

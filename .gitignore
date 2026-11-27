@@ -15,6 +15,12 @@ decisions/news-cards.json
 decisions/pending-orders.json
 decisions/fa-cycle-state.json
 decisions/synthesis-*.json
+decisions/signal-outcomes.jsonl
+decisions/signal-outcomes-evaluated.jsonl
+decisions/ta-tuning-proposals-*.yaml
 briefings/
 *.log
 .pytest_cache/
+data/ai-models/
+*.pt
+*.pth

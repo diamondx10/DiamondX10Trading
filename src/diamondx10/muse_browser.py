@@ -23,8 +23,12 @@ code ```json). Neu muse.ai doi giao dien, cac selector nay co the can
 cap nhat — khi khong nhan dien duoc cau truc trang, ham se bao loi ro
 rang thay vi doan mo.
 """
+import importlib.util
 import json
+import os
 import re
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -92,6 +96,138 @@ def _headless(cfg, headless):
     if headless is not None:
         return bool(headless)
     return bool(_muse_cfg(cfg).get("headless", False))
+
+
+# --- Cai dat / phat hien Playwright + Chromium (dung chung) ---
+# Lenh `muse-setup` va quickstart (buoc 1) dung chung cac ham nay;
+# chi 1 noi cai dat, khong lap lai lenh pip / playwright o __main__.
+
+def _default_browser_roots():
+    """Thu muc cache trinh duyet cua Playwright theo OS.
+
+    PLAYWRIGHT_BROWSERS_PATH (neu dat) dung truoc, sau do la thu
+    muc cache mac dinh cua he dieu hanh.
+    """
+    roots = []
+    env_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if env_path:
+        roots.append(Path(env_path))
+    if sys.platform == "win32":
+        local_app = os.environ.get("LOCALAPPDATA")
+        if local_app:
+            roots.append(Path(local_app) / "ms-playwright")
+    elif sys.platform == "darwin":
+        roots.append(Path.home() / "Library" / "Caches" / "ms-playwright")
+    else:
+        roots.append(Path.home() / ".cache" / "ms-playwright")
+    return roots
+
+
+def find_chromium_executable(search_roots=None):
+    """Duong dan binary Chromium Playwright se dung; None neu khong co.
+
+    Chi tim file, KHONG mo trinh duyet. Trong moi root, tim
+    `chromium-*/chrome-win/chrome.exe` (Windows),
+    `chromium-*/chrome-linux/chrome` (Linux) hoac
+    `chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium`
+    (macOS). search_roots (list duong dan) thay the mac dinh — diem
+    tiem cho test. Khong bao gio raise khi thu muc khong ton tai.
+    """
+    if search_roots is None:
+        roots = _default_browser_roots()
+    else:
+        roots = [Path(root) for root in search_roots]
+    if sys.platform == "win32":
+        rel = Path("chrome-win") / "chrome.exe"
+    elif sys.platform == "darwin":
+        rel = (Path("chrome-mac") / "Chromium.app" / "Contents"
+               / "MacOS" / "Chromium")
+    else:
+        rel = Path("chrome-linux") / "chrome"
+    for root in roots:
+        try:
+            candidates = sorted(Path(root).glob("chromium-*"))
+        except OSError:
+            continue
+        for candidate in candidates:
+            exe = candidate / rel
+            try:
+                if exe.is_file():
+                    return exe
+            except OSError:
+                continue
+    return None
+
+
+def is_playwright_ready(*, search_roots=None):
+    """True neu goi `playwright` cai duoc VA binary Chromium ton tai.
+
+    Package co ma trinh duyet thieu (nua chung) thi KHONG san sang.
+    Kiem tra package bang importlib.util.find_spec (khong import,
+    khong tac dung phu).
+    """
+    if importlib.util.find_spec("playwright") is None:
+        return False
+    return find_chromium_executable(search_roots=search_roots) is not None
+
+
+def install_playwright(runner=None):
+    """Cai Playwright (pip) + Chromium; True neu ca 2 buoc xong.
+
+    runner: ham nhan argv, tra object co .returncode (mac dinh
+    subprocess.run) — diem tiem cho test. In dung cac dong OK / LOI /
+    huong dan va 3 buoc dang nhap dau tien nhu lenh `muse-setup` cu.
+    Khong bao gio raise (OSError -> False).
+    """
+    run = runner if runner is not None else subprocess.run
+    try:
+        pip = run([sys.executable, "-m", "pip", "install", "playwright"])
+    except OSError as exc:
+        print(f"LOI: khong chay duoc pip: {exc}")
+        print("Huong dan: cai Python 3.10+ roi chay lai "
+              "python -m diamondx10 muse-setup")
+        return False
+    if pip.returncode != 0:
+        print("LOI: pip install playwright that bai (xem loi pip o tren).")
+        print("Huong dan: kiem tra mang / quyen ghi, roi chay lai "
+              "python -m diamondx10 muse-setup")
+        return False
+    try:
+        browser = run([sys.executable, "-m", "playwright", "install",
+                       "chromium"])
+    except OSError as exc:
+        print(f"LOI: khong chay duoc playwright: {exc}")
+        return False
+    if browser.returncode != 0:
+        print("LOI: playwright install chromium that bai (xem loi o tren).")
+        print("Huong dan: kiem tra mang roi chay lai "
+              "python -m diamondx10 muse-setup")
+        return False
+    print("OK: da cai Playwright + Chromium.")
+    print("Buoc tiep theo:")
+    print("  1. Chay headed 1 lan de dang nhap (khong --headless):")
+    print("       python -m diamondx10 muse-send --file "
+          "briefings/briefing-forex-<ngay>.md --no-wait")
+    print("  2. Dang nhap vao muse.ai TAY trong cua so trinh duyet mo ra")
+    print("     (khong nhap mat khau vao tool), mo chat chinh cua Muse.")
+    print("  3. Chay lai muse-send (khong --no-wait) de gui briefing va "
+          "doi verdict.")
+    return True
+
+
+def ensure_muse_browser_ready(install=True, runner=None, *,
+                              search_roots=None):
+    """True neu Playwright + Chromium san sang (cai neu thieu).
+
+    Da san sang thi tra True ngay, khong goi runner / subprocess nao.
+    install=False thi chi kiem tra, khong cai. Tra ket qua cai dat
+    neu phai cai (ket qua cai dat la du, khong can kiem tra lai).
+    """
+    if is_playwright_ready(search_roots=search_roots):
+        return True
+    if not install:
+        return False
+    return install_playwright(runner=runner)
 
 
 # --- Mo trinh duyet (helper dung chung cho send + wait) ---

@@ -20,6 +20,12 @@ from .base import SHARED_DEFAULTS, Strategy
 from .breakout import DonchianBreakout
 from .crypto import CryptoMomentum
 from .forex import ForexTrend
+from .soft_rules import (
+    HARD_RULE_KEYS,
+    check_hard_rule_keys,
+    resolve_soft_rules,
+    validate_soft_rules,
+)
 from .us_securities import USSecTrend
 from .xauusd import XauusdTrend
 
@@ -54,7 +60,11 @@ STRATEGY_REGISTRY = {
 # Tham so biet duoc: mac dinh chung + rieng Donchian. Tham so la trong
 # `per_symbol` / `desks` / muc chung ma khong co trong danh sach nay
 # thi bi tu choi (tranh go sai ten tham so roi tuong da ghi de).
-KNOWN_PARAMS = set(SHARED_DEFAULTS) | {"donchian_period", "min_atr_pct"}
+# adx_min: gate ADX(14) — 0 = tat (hanh vi cu); min_atr_pct: loc
+# ATR(14)/gia — chi co gia tri khi duoc dat rieng (Donchian mac
+# dinh 0.003 o lop cua no; chien luoc chung mac dinh tat).
+KNOWN_PARAMS = set(SHARED_DEFAULTS) | {"donchian_period", "min_atr_pct",
+                                        "adx_min"}
 
 # Khoang hop ly cho tung tham so (so). Vuot khoang -> ValueError.
 # Day la gioi han ve sinh (tranh so vo nghia), khong phai khuyen nghi
@@ -75,6 +85,7 @@ PARAM_RANGES = {
     "trail_mult": (0.5, 5.0),
     "donchian_period": (5, 100),
     "min_atr_pct": (0.0, 0.05),
+    "adx_min": (0, 100),
 }
 
 # Tham so phai la so nguyen (khong le).
@@ -125,7 +136,7 @@ def _strategy_class(name, desk=None):
 
 
 def get_strategy(name, desk=None, params=None, desk_params=None,
-                 symbol_params=None):
+                 symbol_params=None, soft_rules=None):
     """Khoi tao 1 instance chien luoc tu registry.
 
     params: tham so chung; desk_params: ghi de rieng desk;
@@ -133,11 +144,18 @@ def get_strategy(name, desk=None, params=None, desk_params=None,
     Thu tu gop trong Strategy.__init__: mac dinh < params <
     DESK_OVERRIDES cua lop < desk_params — nen symbol_params duoc
     gop chung vao desk_params de thang ca DESK_OVERRIDES.
+    soft_rules: list rule mem da validate (hoac tho — Strategy se
+    validate lai); khoa quy tac cung trong bat ky dict tham so nao
+    cung bi tu choi o day.
     """
     cls = _strategy_class(name, desk)
+    for part in (params, desk_params, symbol_params):
+        if part:
+            check_hard_rule_keys(part)
     merged_desk = dict(desk_params or {})
     merged_desk.update(symbol_params or {})
-    return cls(params=params, desk_params=merged_desk)
+    return cls(params=params, desk_params=merged_desk,
+               soft_rules=soft_rules)
 
 
 def validate_strategy_params(params, strategy_name="default"):
@@ -195,7 +213,7 @@ def _strategy_section(cfg):
     section = cfg.get("strategy")
     if isinstance(section, dict):
         return section
-    if any(k in KNOWN_PARAMS or k in ("desks", "per_symbol")
+    if any(k in KNOWN_PARAMS or k in ("desks", "per_symbol", "soft_rules")
            for k in cfg):
         return cfg
     return {}
@@ -234,8 +252,12 @@ def resolve_strategy_params(cfg, desk, symbol, strategy_name="default"):
             f"Symbol {symbol!r} khong co trong config data.symbols "
             f"(co: {', '.join(known_symbols)})")
     section = _strategy_section(cfg)
+    # Quy tac cung: bat ky khoa cung nao duoi strategy: deu bao loi
+    # LOUD o day (truoc ca validate tham so) — khong bao gio lang le
+    # bo qua hay ap dung.
+    check_hard_rule_keys(section)
     shared = {k: v for k, v in section.items()
-              if k not in ("desks", "per_symbol")}
+              if k not in ("desks", "per_symbol", "soft_rules")}
     per_desk = section.get("desks") or {}
     if not isinstance(per_desk, dict):
         raise ValueError("Muc strategy.desks phai la dict")
@@ -263,14 +285,17 @@ def build_strategy_for_symbol(cfg, desk, symbol, strategy_name="default"):
     """Khoi tao chien luoc cho 1 symbol cu the: tham so da resolve
     (mac dinh < chung < desk < symbol) roi truyen thang vao lop.
     Day la ham backtest / signals dung de moi symbol chay dung
-    tham so cua no."""
+    tham so cua no. Soft rule ap dung cho (desk, symbol) cung duoc
+    resolve + gan vao instance o day — day la diem duy nhat gan
+    soft rule vao chien luoc theo symbol."""
     params = resolve_strategy_params(cfg, desk, symbol, strategy_name)
+    soft = resolve_soft_rules(cfg, desk, symbol)
     cls = _strategy_class(strategy_name, desk)
     # Truyen qua desk_params (muc uu tien cao nhat trong
     # Strategy.__init__): neu truyen qua params thi DESK_OVERRIDES
     # cua lop (vd crypto 2,0x) se ghi de len gia tri symbol da
     # resolve (vd ETHUSD 1,0) — sai thu tu uu tien.
-    return cls(params={}, desk_params=params)
+    return cls(params={}, desk_params=params, soft_rules=soft)
 
 
 __all__ = [
@@ -278,10 +303,14 @@ __all__ = [
     "STRATEGY_REGISTRY",
     "KNOWN_PARAMS",
     "PARAM_RANGES",
+    "HARD_RULE_KEYS",
     "list_strategies",
     "get_strategy",
     "validate_strategy_params",
     "resolve_strategy_params",
     "build_strategy_for_symbol",
+    "check_hard_rule_keys",
+    "validate_soft_rules",
+    "resolve_soft_rules",
     "Strategy",
 ]

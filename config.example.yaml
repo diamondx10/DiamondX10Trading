@@ -66,14 +66,105 @@ strategy:
   atr_sl_mult: 1.5
   tp_mult: 2.0
   trail_mult: 1.5
+  # Gate ADX(14) / loc ATR% (xem strategies/soft_rules.py): adx_min = 0
+  # nghia la TAT (hanh vi cu); min_atr_pct = 0.0 nghia la TAT. Gia tri
+  # > 0 thi ADX(14) < adx_min hoac ATR(14)/gia < min_atr_pct -> HOLD,
+  # khong mo lenh moi. Ca hai deu co gia tri rieng theo symbol o duoi.
+  adx_min: 0
+  min_atr_pct: 0.0
   desks:
     crypto: {atr_sl_mult: 2.0, trail_mult: 2.0}
-  # Tinh chinh theo symbol (Phase B): chi doi con so, khong doi quy tac.
-  # Thu tu uu tien: mac dinh < chung < desk < symbol. Vi du (dang comment,
-  # bo comment de dung): BTCUSD giu 2.0 nhu desk crypto; XAUUSD doi nguong RSI mua.
-  # per_symbol:
-  #   BTCUSD: {atr_sl_mult: 2.0}
-  #   XAUUSD: {rsi_buy_low: 55}
+  # Tinh chinh theo symbol (Phase B + bang nghien cuu 2026-11-27).
+  # Thu tu uu tien: mac dinh < chung < desk < symbol. Chi nhung truong
+  # khac mac dinh chung moi liet ke; con lai thua huong mac dinh.
+  # HONEST LIMIT: day la diem xuat phat theo tai lieu / thuc hanh, KHONG
+  # phai bang chung sinh loi; nguong min_atr_pct va gate ADX lay tu
+  # khoang dien hinh da cong bo, chua kiem chung tren chinh symbol cua
+  # dx10. Kiem chung that can backfill MT5 tren Windows + walk-forward
+  # compare/sweep xep hang OOS, ~50-100 lenh/symbol. Neu walk-forward
+  # cho thay mac dinh chung thang ghi de rieng symbol thi GIU MAC DINH.
+  # Nguon: xem docs/strategy-engine.md (MQL5 London Breakout Pro,
+  # Pro-Scalper XAUUSD, Camovia gold, Capital.com ADX, ForexBite ATR,
+  # Arconomy BTCUSD M15, TradingView EMA 9/21 + RSI + ADX,
+  # AlertaChart BTC timing, TradePiko earnings, American Dream ORB).
+  per_symbol:
+    # Slower cross (8/21) + ADX>=20 cuts M15 whipsaw on the lowest-vol pair; all else = global default.
+    EURUSD: {sma_fast: 8, sma_slow: 21, adx_min: 20, min_atr_pct: 0.0001}
+    # Slowest trend + widest stops/RSI window for 2-3x FX volatility; 85/15 veto stops fading a gold trend.
+    XAUUSD: {sma_fast: 10, sma_slow: 30, rsi_buy_low: 55, rsi_buy_high: 75, rsi_sell_low: 25, rsi_sell_high: 45, rsi_extreme_high: 85, rsi_extreme_low: 15, atr_sl_mult: 2.0, tp_mult: 1.5, trail_mult: 2.0, adx_min: 30, min_atr_pct: 0.0003}
+    # Fast 9/21 momentum + ADX>=25 is the published M15 crypto pattern; 2.0xATR survives 24/7 spikes.
+    BTCUSD: {sma_fast: 9, sma_slow: 21, rsi_buy_low: 55, rsi_buy_high: 75, rsi_sell_low: 25, rsi_sell_high: 45, rsi_extreme_high: 85, rsi_extreme_low: 15, atr_sl_mult: 2.0, trail_mult: 2.0, adx_min: 25, min_atr_pct: 0.0010}
+    # Same momentum frame as BTC but higher hourly volatility, so shorter TP (1.5x).
+    ETHUSD: {sma_fast: 9, sma_slow: 21, rsi_buy_low: 55, rsi_buy_high: 75, rsi_sell_low: 25, rsi_sell_high: 45, rsi_extreme_high: 85, rsi_extreme_low: 15, atr_sl_mult: 2.0, tp_mult: 1.5, trail_mult: 2.0, adx_min: 25, min_atr_pct: 0.0015}
+    # Near-BTC volatility but no weekend drop-off and less trend persistence; slower cross (10/30), standard stops.
+    BNBUSD: {sma_fast: 10, sma_slow: 30, adx_min: 20, min_atr_pct: 0.0010}
+    # High-beta semi momentum: wider RSI window lets winners run; 1.5xATR keeps stops inside the session.
+    AMD: {sma_fast: 8, sma_slow: 21, rsi_buy_low: 55, rsi_buy_high: 75, rsi_sell_low: 25, rsi_sell_high: 45, rsi_extreme_high: 85, rsi_extreme_low: 15, adx_min: 20, min_atr_pct: 0.0020}
+    # Highest-beta name: widest stop/trail + strongest ADX gate; earnings blackout is mandatory.
+    NVDA: {sma_fast: 9, sma_slow: 21, rsi_buy_low: 55, rsi_buy_high: 75, rsi_sell_low: 25, rsi_sell_high: 45, rsi_extreme_high: 85, rsi_extreme_low: 15, atr_sl_mult: 2.0, trail_mult: 2.0, adx_min: 25, min_atr_pct: 0.0020}
+    # Mean-reversion-prone / weak-trend name: slowest cross, narrowest RSI window, shortest TP, widest trail.
+    INTC: {sma_fast: 10, sma_slow: 30, rsi_buy_high: 65, rsi_sell_low: 35, atr_sl_mult: 2.0, tp_mult: 1.5, trail_mult: 2.0, adx_min: 20, min_atr_pct: 0.0015}
+    # CDNS, SNPS: no override — keep global default.
+  # Quy tac mem (soft rules — xem strategies/soft_rules.py). Bo comment
+  # de dung. Moi rule: name (duy nhat, bat buoc), scope (bo qua = moi
+  # symbol; {desk: ...} hoac {symbol: ...}), condition (type + tham so),
+  # effect: block (dieu kien dung -> HOLD) / require (dieu kien sai ->
+  # HOLD) / {type: scale, factor: 0<x<=1} (dieu kien dung -> giam size).
+  # Condition v1: rsi_range {low, high}, sma_cross {direction:
+  # bullish|bearish}, adx_min {value}, adx_max {value}, atr_pct_min
+  # {value}, atr_pct_max {value}, pattern {name}. KHONG co dieu kien
+  # cua so thoi gian / phien o v1 (bar time mo phong khong phai epoch);
+  # blackout earnings / phien dung co che cung no_trade_events.
+  # Rule go sai bao loi LOUD khi load config, khong lang le bo qua.
+  # soft_rules:
+  #   # XAUUSD: bien dong dot bien — ATR% vuot 0.5% thi khong mo lenh moi.
+  #   - {name: xauusd-vol-spike-block, scope: {symbol: XAUUSD},
+  #      condition: {type: atr_pct_min, value: 0.005}, effect: block}
+  #   # Crypto: xu huong yeu (ADX <= 25) thi giam mot nua size.
+  #   - {name: crypto-adx-weak-scale, scope: {desk: crypto},
+  #      condition: {type: adx_max, value: 25},
+  #      effect: {type: scale, factor: 0.5}}
+  #   # EURUSD: khong co xu huong (ADX <= 20) thi khong vao lenh trend.
+  #   - {name: eurusd-weak-trend-block, scope: {symbol: EURUSD},
+  #      condition: {type: adx_max, value: 20}, effect: block}
+# Vong hoc TA (TA learning loop — xem docs/ta-learning-loop.md).
+# Ghi lai moi khuyen nghi (outcomes.py), cham diem tu gia that
+# (evaluate-signals), xem bai hoc + de xuat tinh chinh (ta-review).
+# Vong hoc KHONG tu doi tham so — de xuat chi ap khi Phu duyet tay
+# (ta-review --apply, co xac nhan go chu).
+learning:
+  # So nen M15 cham diem sau khi vao lenh (20 nen = 5 gio): trong
+  # cua so nay, TP cham truoc -> thang, SL cham truoc -> thua,
+  # khong cham cai nao -> timeout, tinh theo gia cuoi cua so.
+  outcome_window_bars: 20
+  # So mau toi thieu moi lat cat (symbol / chien luoc / soft rule /
+  # PTCB) moi duoc de xuat tinh chinh — it hon thi bao "chua du mau".
+  min_sample_for_proposal: 20
+# Mo hinh AI outcome offline (xem docs/ai-ta-model.md): hoc
+# P(ket qua lenh | context thi truong, tham so TA) de chinh tham
+# so TA tu log + lich su. Torch la phu thuoc TUY CHON (chay
+# `ai-setup` 1 lan, khong nam trong requirements.txt, quickstart
+# khong tu cai). Train offline theo lich (ai-train / ai-tune),
+# KHONG BAO GIO trong vong live M15.
+ai:
+  # Thu muc weights + sidecar JSON + bao cao train (gitignore).
+  models_dir: data/ai-models
+  # Do dai chuoi feature mo hinh an (32 hang lien tiep).
+  seq_len: 32
+  # So bar gan nhat dung de xep hang ung vien tham so (ai-tune).
+  rank_bars: 2000
+# Multi-timeframe TA v1 (xem multitimeframe.py): trend H1 loc tin
+# hieu entry M15 — tin hieu nguoc trend H1 manh bi chan thanh HOLD.
+# Thieu muc nay thi loc TAT (M15-only, hanh vi cu). Timing M5 va
+# H4 NGOAI v1 (timing_enabled mac dinh false, H4 khong hop le).
+timeframes:
+  entry: M15  # khung nen vao lenh (M1 | M5 | M15 | H1 | D1)
+  trend: H1  # khung nen xac dinh xu huong (M1 | M5 | M15 | H1 | D1)
+  timing: M5  # khung nen tinh thoi diem vao — NGOAI v1, chi de cho
+  trend_enabled: true  # bat loc HTF (false = M15-only nhu cu)
+  timing_enabled: false  # bat loc timing M5 — NGOAI v1, de false
+  htf_adx_min: 20  # ADX(14) H1 toi thieu moi tin trend (thap hon thi khong loc)
+  trend_bars: 60  # so bar H1 gan nhat dung de tinh trend
 data:
   # provider: simulated | mt5
   #   simulated: du lieu mo phong (mac dinh, khong can MT5).

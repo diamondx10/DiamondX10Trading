@@ -19,9 +19,21 @@ vao trong dx10.
 
 ## 1. Cai dat 1 lan (`muse-setup`)
 
-Playwright la phu thuoc **tu chon (opt-in)**, khong nam trong
-luong cai dat mac dinh cua `quickstart.py` va khong can thiet
-neu van muon gui briefing bang tay.
+Playwright la phu thuoc **tu chon (opt-in)** — nhung tu nay
+`quickstart.py` **tu dong cai o buoc 1**: truoc het kiem tra da co
+Playwright + Chromium chua, chi cai khi thieu, da co thi khong lam
+gi (no-op). Cai loi thi buoc 1 chi in canh bao kem lenh cai tay
+(`python -m diamondx10 muse-setup`) roi chay tiep — Muse la tuy
+chon, khong chan trading. Muon bo qua han muc nay:
+
+```bash
+python quickstart.py --skip-muse-setup
+```
+
+(`--skip-install` cung bo qua luon muc kiem tra Muse o buoc 1.)
+
+Van co the cai tay bat ky luc nao bang lenh duoi day — cung 1
+helper cai dat voi buoc 1 cua quickstart, khong lap lai:
 
 ```bash
 python -m diamondx10 muse-setup

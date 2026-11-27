@@ -4,8 +4,10 @@
 Thu tu chay (co y): CHUAN BI XONG moi hoi thong tin dang nhap.
   0. Kiem tra Python >= 3.10.
   1. Tu dong cai cac goi can thiet: requirements.txt (pyyaml, pytest)
-     + MetaTrader5 (chi cai duoc tren Windows). Cai loi thi dung ngay,
-     chua hoi gi ve tai khoan.
+     + MetaTrader5 (chi cai duoc tren Windows) + Playwright/Chromium
+     khi chua co (de gui briefing sang Muse; cai khong duoc thi chi
+     canh bao roi chay tiep — Muse la tuy chon). Cai requirements
+     hoac MetaTrader5 loi thi dung ngay, chua hoi gi ve tai khoan.
   2. Quet tim MT5 terminal (uu tien: bien moi truong MT5_TERMINAL_PATH,
      roi mt5.terminal_path trong config.yaml cu, roi cac duong dan da
      biet — truoc het C:/Program Files/MetaTrader 5 EXNESS/terminal64.exe
@@ -44,6 +46,7 @@ Chay:  python quickstart.py
                                              kiem tra terminal, khong
                                              hoi dang nhap)
        python quickstart.py --skip-tests     (bo qua buoc kiem tra test_run.py)
+       python quickstart.py --skip-muse-setup (bo qua kiem tra/cai Playwright/Chromium cho Muse)
        python quickstart.py --trade          (them buoc dat lenh demo)
        python quickstart.py --live-once      (them 1 chu ky live 4 desk)
        python quickstart.py --live           (them vong lap live 1 desk)
@@ -461,6 +464,41 @@ def _run_test_suite():
     return r.returncode
 
 
+def _ensure_muse_browser():
+    """Kiem tra/cai Playwright + Chromium cho Muse o buoc 1.
+
+    Goi ensure_muse_browser_ready() trong diamondx10.muse_browser.
+    Import LAZY trong ham: helper moi duoc viet, chua chac da co
+    trong moi ban, va quickstart phai chay duoc ca khi module chua
+    co helper (luc do chi canh bao roi chay tiep). Tra True neu
+    san sang, False neu khong. KHONG BAO GIO raise, khong doi
+    exit code: Muse la tuy chon, cai loi khong chan trading.
+    Sau khi cai MOI xong, chinh helper in 3 buoc dang nhap lan
+    dau — khong in lai o day.
+    """
+    try:
+        from diamondx10.muse_browser import ensure_muse_browser_ready
+    except Exception:  # noqa: BLE001 — helper chua co thi chi canh bao
+        print("  ! Khong kiem tra duoc Playwright/Chromium cho Muse "
+              "(module muse_browser chua san sang).")
+        print("    Chay tay khi can: python -m diamondx10 muse-setup")
+        print("    (Muse la tuy chon — trading van chay binh thuong.)")
+        return False
+    try:
+        ready = ensure_muse_browser_ready()
+    except Exception:  # noqa: BLE001 — loi cai dat thi chi canh bao
+        print("  ! Kiem tra/cai Playwright/Chromium cho Muse gap loi.")
+        print("    Chay tay khi can: python -m diamondx10 muse-setup")
+        print("    (Muse la tuy chon — trading van chay binh thuong.)")
+        return False
+    if not ready:
+        print("  ! Chua cai duoc Playwright/Chromium cho Muse.")
+        print("    Chay tay khi can: python -m diamondx10 muse-setup")
+        print("    (Muse la tuy chon — trading van chay binh thuong.)")
+        return False
+    return True
+
+
 # ---------------------------------------------------------------- main
 def main(argv=None):
     p = argparse.ArgumentParser(description="DiamondX10 quickstart (MT5 DEMO)")
@@ -479,6 +517,9 @@ def main(argv=None):
                         "1 desk (Ctrl+C de dung)")
     p.add_argument("--skip-tests", action="store_true",
                    help="bo qua buoc kiem tra test_run.py o buoc 7")
+    p.add_argument("--skip-muse-setup", action="store_true",
+                   help="bo qua kiem tra/cai Playwright/Chromium cho Muse "
+                        "o buoc 1")
     args = p.parse_args(argv)
 
     print("DiamondX10 quickstart — MT5 DEMO (Exness), KHONG bao gio lenh that")
@@ -510,6 +551,12 @@ def main(argv=None):
             print(f"     Ban dang chay tren: {sys.platform}")
             print("     Hay chay script nay tren may Windows co MT5 terminal.")
             return 1
+        # Playwright/Chromium cho Muse (tuy chon): cai loi chi canh bao,
+        # khong dung chay. --skip-install o tren da bo qua ca muc nay.
+        if args.skip_muse_setup:
+            print("  Bo qua kiem tra Muse (--skip-muse-setup).")
+        else:
+            _ensure_muse_browser()
 
     # --- 2. Kiem tra MT5 terminal (truoc khi hoi dang nhap) -----------
     print("[2/8] Kiem tra MT5 terminal (chua hoi dang nhap)")

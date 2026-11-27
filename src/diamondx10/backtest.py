@@ -65,7 +65,9 @@ from .data.feeds import SimulatedFeed
 from .data.history import HistoryStore
 from .execution import CONTRACT_SIZES, DEFAULT_CONTRACT_SIZE
 from .models.quant import atr as _atr
+from .multitimeframe import compute_htf_trend, resolve_timeframes
 from .risk import expected_shortfall, position_size, value_at_risk
+from .signals import generate_signals
 from .strategies import STRATEGIES, build_strategies
 from .strategies.registry import (
     STRATEGY_REGISTRY,
@@ -237,6 +239,7 @@ def _close_position(position, exit_price, exit_reason, exit_index,
         "entry_reason": position["entry_reason"],
         "units": units,
         "lots": position["lots"],
+        "size_scale": position.get("size_scale", 1.0),
         "below_min_lot": position["lots"] < MIN_LOT,
         "sl_initial": position["sl_initial"],
         "sl": position["sl"],
@@ -249,8 +252,56 @@ def _close_position(position, exit_price, exit_reason, exit_index,
     }
 
 
+def _resolve_mtf(cfg, symbols, trend_bars_by_symbol):
+    """Chia bar trend (H1) theo symbol cho backtest MTF.
+
+    Tra (tf_cfg, trend_map, missing): tf_cfg tu resolve_timeframes;
+    trend_map {symbol: [bar trend]} chi khi trend_enabled; missing
+    la symbol bat loc nhung khong co bar trend (chay M15-only).
+    Khi loc tat thi trend_map rong + missing rong (khong canh bao).
+    """
+    tf_cfg = resolve_timeframes(cfg)
+    trend_map, missing = {}, []
+    if not tf_cfg["trend_enabled"]:
+        return tf_cfg, trend_map, missing
+    supplied = trend_bars_by_symbol or {}
+    for symbol in symbols:
+        bars = supplied.get(symbol)
+        if bars:
+            trend_map[symbol] = list(bars)
+        else:
+            missing.append(symbol)
+    return tf_cfg, trend_map, missing
+
+
+def _warn_mtf_missing(tf_cfg, missing):
+    """Canh bao 1 dong khi thieu bar trend: chay M15-only (khong loc),
+    giong degradation cua live — khong raise, khong dung backtest."""
+    if missing:
+        print(f"Canh bao MTF: khong co bar {tf_cfg['trend']} cho "
+              f"{', '.join(missing)} — chay M15-only "
+              "(khong ap dung loc HTF)")
+
+
+def _load_trend_bars(store, symbols, timeframe, start=None, end=None):
+    """Doc bar trend tu kho cho moi symbol (cung cua so start/end
+    voi bar entry). Symbol nao khong co bar trend thi BO QUA (tra
+    ve thieu o _resolve_mtf) — KHONG raise nhu bar entry, vi thieu
+    bar trend chi co nghia la chay M15-only cho symbol do."""
+    trend_map = {}
+    for symbol in symbols:
+        try:
+            bars = store.get_bars(symbol, timeframe, start=start, end=end)
+        except Exception:  # noqa: BLE001 — thieu bar trend = M15-only
+            bars = []
+        if bars:
+            trend_map[symbol] = bars
+    return trend_map
+
+
 def _run_segment(strategy, bars, *, symbol, capital, risk_pct,
-                 contract_size, fee_pct, slippage_pct):
+                 contract_size, fee_pct, slippage_pct, cfg=None,
+                 desk=None, strategy_name=None, trend_bars=None):
     """Chay engine tren 1 doan bars lien tuc. Tra ve dict trades,
     equity_curve (do dai = so bar, bat dau = capital) va so tin hieu
     bi bo qua vi size tinh ra bang 0."""
@@ -260,6 +311,11 @@ def _run_segment(strategy, bars, *, symbol, capital, risk_pct,
     realized = 0.0
     skipped_zero_size = 0
     atr_period = strategy.params.get("atr_period", 14)
+    # Loc HTF (MTF v1): chi bat khi cfg bat trend_enabled VA co bar
+    # trend cho symbol nay. Thieu 1 trong 2 -> M15-only nhu cu.
+    tf_cfg = resolve_timeframes(cfg) if cfg is not None else None
+    mtf_on = bool(tf_cfg and tf_cfg["trend_enabled"] and trend_bars
+                  and desk is not None)
     for i, bar in enumerate(bars):
         history = bars[:i + 1]
         if position is not None and i > position["entry_index"]:
@@ -295,10 +351,36 @@ def _run_segment(strategy, bars, *, symbol, capital, risk_pct,
                 realized += trade["pnl"]
                 position = None
         if position is None and len(history) >= WARMUP_BARS:
-            action, sig_reason, levels = strategy.signal(history)
+            if mtf_on:
+                # Bar trend den thoi diem bar entry hien tai (chi bar
+                # da dong truoc/gan nhat — khong nhin tuong lai),
+                # gioi han trend_bars bar gan nhat theo config.
+                # Luu y: bar H1 co time <= time bar M15 co the van
+                # dang chay (chua dong) — cung xap xi nhu live se
+                # dung; chua co co che chi lay H1 da dong o v1.
+                window = [b for b in trend_bars
+                          if b["time"] <= bar["time"]]
+                window = window[-tf_cfg["trend_bars"]:]
+                trend = compute_htf_trend(
+                    window, cfg, timeframe=tf_cfg["trend"],
+                    desk=desk, symbol=symbol)
+                # Cung duong loc + cung ly do nhu live: tin hieu qua
+                # generate_signals(htf_trend=...) (xem signals.py).
+                sig = generate_signals(
+                    desk, history, symbol=symbol, cfg=cfg,
+                    strategy_name=strategy_name or "default",
+                    htf_trend=trend)
+                action, sig_reason, levels = (
+                    sig["action"], sig["reason"], sig["levels"])
+            else:
+                action, sig_reason, levels = strategy.signal(history)
             if action in ("BUY", "SELL") and levels:
                 entry = levels["entry"]
                 units = position_size(capital, risk_pct, entry, levels["sl"])
+                # Soft rule scale: size_scale trong levels (<= 1.0) chi
+                # GIAM units — khong bao gio tang vuot size cung da tinh.
+                size_scale = float(levels.get("size_scale", 1.0) or 1.0)
+                units *= size_scale
                 if units <= 0:
                     skipped_zero_size += 1
                 else:
@@ -310,6 +392,7 @@ def _run_segment(strategy, bars, *, symbol, capital, risk_pct,
                         "entry_time": bar["time"],
                         "entry_reason": sig_reason,
                         "units": units,
+                        "size_scale": size_scale,
                         "lots": units / contract_size if contract_size else 0.0,
                         "sl_initial": levels["sl"],
                         "sl": levels["sl"],
@@ -334,20 +417,27 @@ def _run_segment(strategy, bars, *, symbol, capital, risk_pct,
 
 
 def _run_symbol(strategy, bars, *, symbol, capital, risk_pct,
-                contract_size, fee_pct, slippage_pct, train_fraction):
+                contract_size, fee_pct, slippage_pct, train_fraction,
+                cfg=None, desk=None, strategy_name=None, trend_bars=None):
     """Chay full + 2 doan train/test cho 1 symbol."""
     full = _run_segment(strategy, bars, symbol=symbol, capital=capital,
                         risk_pct=risk_pct, contract_size=contract_size,
-                        fee_pct=fee_pct, slippage_pct=slippage_pct)
+                        fee_pct=fee_pct, slippage_pct=slippage_pct,
+                        cfg=cfg, desk=desk, strategy_name=strategy_name,
+                        trend_bars=trend_bars)
     split_idx = int(len(bars) * train_fraction)
     train = _run_segment(strategy, bars[:split_idx], symbol=symbol,
                          capital=capital, risk_pct=risk_pct,
                          contract_size=contract_size, fee_pct=fee_pct,
-                         slippage_pct=slippage_pct)
+                         slippage_pct=slippage_pct,
+                         cfg=cfg, desk=desk, strategy_name=strategy_name,
+                         trend_bars=trend_bars)
     test = _run_segment(strategy, bars[split_idx:], symbol=symbol,
                         capital=capital, risk_pct=risk_pct,
                         contract_size=contract_size, fee_pct=fee_pct,
-                        slippage_pct=slippage_pct)
+                        slippage_pct=slippage_pct,
+                        cfg=cfg, desk=desk, strategy_name=strategy_name,
+                        trend_bars=trend_bars)
     return {
         "capital_usd": capital,
         "risk_pct": risk_pct,
@@ -374,7 +464,7 @@ def _run_symbol(strategy, bars, *, symbol, capital, risk_pct,
 def run_backtest(desk, days=30, *, cfg=None, symbols=None,
                  train_fraction=0.7, bars=None, fee_pct=None,
                  slippage_pct=None, strategy_name=None,
-                 bars_by_symbol=None):
+                 bars_by_symbol=None, trend_bars_by_symbol=None):
     """Backtest 1 desk tren du lieu mo phong. Tra ve dict ket qua
     (trades, metrics theo desk/symbol/doan, assumptions) — xem
     `format_backtest_report` de in thanh van ban.
@@ -391,6 +481,12 @@ def run_backtest(desk, days=30, *, cfg=None, symbols=None,
     `strategy_name`: None/"default" = quy tac chung da chot;
     "donchian" = chien luoc breakout Donchian (CHI DE SO SANH
     TRONG BACKTEST, khong dung cho duong live).
+    `trend_bars_by_symbol` (MTF v1): dict {symbol: [bar trend H1]}
+    — chi ap khi cfg bat `timeframes.trend_enabled` (xem
+    multitimeframe.resolve_timeframes); tin hieu vao lenh khi do
+    chay qua generate_signals(htf_trend=...) nhu live. Symbol nao
+    thieu bar trend thi chay M15-only + in 1 dong canh bao. Khong
+    co muc `timeframes:` trong cfg thi loc TAT, ket qua y het cu.
     """
     if desk not in STRATEGIES:
         raise ValueError(f"Desk khong biet: {desk!r} "
@@ -456,6 +552,10 @@ def run_backtest(desk, days=30, *, cfg=None, symbols=None,
         desk_test_curve = [desk_cap] * (len(bars) - split_idx)
     contract_size = CONTRACT_SIZES.get(desk, DEFAULT_CONTRACT_SIZE)
     per_symbol_cap = _split_capital(desk_cap, len(symbols))
+    # Loc HTF (MTF v1): bar trend theo symbol + canh bao symbol thieu.
+    tf_cfg, trend_map, mtf_missing = _resolve_mtf(
+        cfg, symbols, trend_bars_by_symbol)
+    _warn_mtf_missing(tf_cfg, mtf_missing)
     per_symbol = {}
     all_trades = []
     # Moc thoi gian moi symbol (de noi duong equity theo truc thoi
@@ -466,7 +566,9 @@ def run_backtest(desk, days=30, *, cfg=None, symbols=None,
         res = _run_symbol(strategies[symbol], bars_map[symbol], symbol=symbol, capital=per_symbol_cap,
                           risk_pct=risk_pct, contract_size=contract_size,
                           fee_pct=fee, slippage_pct=slip,
-                          train_fraction=train_fraction)
+                          train_fraction=train_fraction,
+                          cfg=cfg, desk=desk, strategy_name=strategy_name,
+                          trend_bars=trend_map.get(symbol))
         per_symbol[symbol] = res
         all_trades.extend(res["trades"])
         symbol_times[symbol] = [b["time"] for b in bars_map[symbol]]
@@ -527,6 +629,12 @@ def run_backtest(desk, days=30, *, cfg=None, symbols=None,
         "symbols": symbols,
         "train_fraction": train_fraction,
         "simulated": True,
+        "multitimeframe": {
+            "enabled": tf_cfg["trend_enabled"],
+            "entry": tf_cfg["entry"],
+            "trend": tf_cfg["trend"],
+            "missing_trend_bars": mtf_missing,
+        },
         "assumptions": assumptions,
         "metrics": desk_metrics,
         "segments": {
@@ -557,16 +665,19 @@ def _pick_strategy(desk, cfg, strategy_name=None, symbol=None):
         return build_strategy_for_symbol(cfg, desk, symbol, name)
     cfg_s = (cfg or {}).get("strategy") or {}
     shared = {k: v for k, v in cfg_s.items()
-              if k not in ("desks", "per_symbol")}
+              if k not in ("desks", "per_symbol", "soft_rules")}
     desk_params = (cfg_s.get("desks") or {}).get(desk) or {}
+    from .strategies import resolve_soft_rules
+    soft = resolve_soft_rules(cfg, desk, None)
     return get_strategy(name, desk=desk, params=shared,
-                        desk_params=desk_params)
+                        desk_params=desk_params, soft_rules=soft)
 
 
 def run_walk_forward(desk, days=90, *, cfg=None, symbols=None,
                      train_bars=60, test_bars=20, step_bars=20,
                      fee_pct=None, slippage_pct=None, bars=None,
-                     strategy_name=None, bars_by_symbol=None):
+                     strategy_name=None, bars_by_symbol=None,
+                     trend_bars_by_symbol=None):
     """Walk-forward validation (y tuong tu repo DiamondX10 cu,
     backtest/walk_forward.py — nhung chay bang engine cua chinh tool
     nay, khong copy ban loi cua repo cu: lot co dinh 0,01, SL tinh
@@ -587,6 +698,9 @@ def run_walk_forward(desk, days=90, *, cfg=None, symbols=None,
     1 chuoi bar rieng; so cua so lay theo symbol NGAN nhat (moi cua
     so phai du bar cho moi symbol), duong equity cua so noi theo
     truc thoi gian.
+    `trend_bars_by_symbol` (MTF v1): nhu `run_backtest` — bar trend
+    H1 theo symbol, chi ap khi cfg bat `timeframes.trend_enabled`;
+    symbol thieu bar trend thi chay M15-only + canh bao.
     """
     if desk not in STRATEGIES:
         raise ValueError(f"Desk khong biet: {desk!r} "
@@ -648,6 +762,10 @@ def run_walk_forward(desk, days=90, *, cfg=None, symbols=None,
                 f"{train_bars + test_bars}, chi co {len(bars)}")
     contract_size = CONTRACT_SIZES.get(desk, DEFAULT_CONTRACT_SIZE)
     per_symbol_cap = _split_capital(desk_cap, len(symbols))
+    # Loc HTF (MTF v1) — nhu run_backtest.
+    tf_cfg, trend_map, mtf_missing = _resolve_mtf(
+        cfg, symbols, trend_bars_by_symbol)
+    _warn_mtf_missing(tf_cfg, mtf_missing)
     windows = []
     oos_trades = []
     oos_curve = [desk_cap]
@@ -675,14 +793,19 @@ def run_walk_forward(desk, days=90, *, cfg=None, symbols=None,
             strat_sym = strategies[symbol]
             # Danh gia TRUC TIEP tren tung doan (khong cat train/test
             # ben trong nua — doan train/test da duoc cat o vong ngoai).
+            # MTF: cung loc HTF nhu run_backtest (generate_signals).
             train_seg_res = _run_segment(
                 strat_sym, train_seg, symbol=symbol, capital=per_symbol_cap,
                 risk_pct=risk_pct, contract_size=contract_size,
-                fee_pct=fee, slippage_pct=slip)
+                fee_pct=fee, slippage_pct=slip,
+                cfg=cfg, desk=desk, strategy_name=strategy_name,
+                trend_bars=trend_map.get(symbol))
             test_seg_res = _run_segment(
                 strat_sym, test_seg, symbol=symbol, capital=per_symbol_cap,
                 risk_pct=risk_pct, contract_size=contract_size,
-                fee_pct=fee, slippage_pct=slip)
+                fee_pct=fee, slippage_pct=slip,
+                cfg=cfg, desk=desk, strategy_name=strategy_name,
+                trend_bars=trend_map.get(symbol))
             win["per_symbol"][symbol] = {
                 "train": compute_metrics(
                     train_seg_res["trades"], train_seg_res["equity_curve"],
@@ -740,6 +863,12 @@ def run_walk_forward(desk, days=90, *, cfg=None, symbols=None,
         "test_bars": test_bars,
         "step_bars": step_bars,
         "n_windows": len(windows),
+        "multitimeframe": {
+            "enabled": tf_cfg["trend_enabled"],
+            "entry": tf_cfg["entry"],
+            "trend": tf_cfg["trend"],
+            "missing_trend_bars": mtf_missing,
+        },
         "windows": windows,
         "aggregated": aggregated,
         "aggregated_train": aggregated_train,
@@ -856,6 +985,14 @@ def run_backtest_from_history(desk, cfg, *, symbols=None,
     try:
         bars_map = _load_history_bars(store, symbols, timeframe,
                                       start=start, end=end)
+        # MTF v1: bar trend cung cua so (start/end) tu kho; symbol
+        # nao khong co bar trend thi M15-only + canh bao o run_backtest
+        # (khong raise nhu bar entry).
+        tf_cfg = resolve_timeframes(cfg)
+        trend_map = {}
+        if tf_cfg["trend_enabled"]:
+            trend_map = _load_trend_bars(store, symbols, tf_cfg["trend"],
+                                         start=start, end=end)
     finally:
         if own_store:
             store.close()
@@ -863,7 +1000,7 @@ def run_backtest_from_history(desk, cfg, *, symbols=None,
         desk, _history_span_days(bars_map), cfg=cfg, symbols=symbols,
         train_fraction=train_fraction, bars_by_symbol=bars_map,
         strategy_name=strategy_name, fee_pct=fee_pct,
-        slippage_pct=slippage_pct)
+        slippage_pct=slippage_pct, trend_bars_by_symbol=trend_map)
     return _mark_history_result(result, timeframe, bars_map)
 
 
@@ -889,6 +1026,13 @@ def run_walk_forward_from_history(desk, cfg, *, symbols=None,
     try:
         bars_map = _load_history_bars(store, symbols, timeframe,
                                       start=start, end=end)
+        # MTF v1: nhu run_backtest_from_history (thieu bar trend thi
+        # M15-only + canh bao o run_walk_forward, khong raise).
+        tf_cfg = resolve_timeframes(cfg)
+        trend_map = {}
+        if tf_cfg["trend_enabled"]:
+            trend_map = _load_trend_bars(store, symbols, tf_cfg["trend"],
+                                         start=start, end=end)
     finally:
         if own_store:
             store.close()
@@ -896,7 +1040,8 @@ def run_walk_forward_from_history(desk, cfg, *, symbols=None,
         desk, _history_span_days(bars_map), cfg=cfg, symbols=symbols,
         train_bars=train_bars, test_bars=test_bars, step_bars=step_bars,
         bars_by_symbol=bars_map, strategy_name=strategy_name,
-        fee_pct=fee_pct, slippage_pct=slippage_pct)
+        fee_pct=fee_pct, slippage_pct=slippage_pct,
+        trend_bars_by_symbol=trend_map)
     return _mark_history_result(result, timeframe, bars_map)
 
 
@@ -962,7 +1107,8 @@ def _metrics_summary(metrics):
 def compare_strategies(desk, strategy_names, days=90, *, cfg=None,
                        symbols=None, train_bars=60, test_bars=20,
                        step_bars=20, fee_pct=None, slippage_pct=None,
-                       bars=None, bars_by_symbol=None):
+                       bars=None, bars_by_symbol=None,
+                       trend_bars_by_symbol=None):
     """Chay walk-forward cho nhieu chien luoc tren CUNG du lieu va tra
     bang so sanh CHI TREN ket qua out-of-sample (doan test).
 
@@ -976,6 +1122,11 @@ def compare_strategies(desk, strategy_names, days=90, *, cfg=None,
     "walk_forward" giu ket qua day du tung chien luoc de doc sau.
     `bars_by_symbol` (Phase C): nhu `run_backtest` — moi symbol
     1 chuoi bar rieng (du lieu that tu kho).
+    `trend_bars_by_symbol` (MTF v1): loc HTF duoc thua huong QUA
+    run_walk_forward — chi khi caller truyen bar trend (vd load tu
+    kho) VA cfg bat `timeframes.trend_enabled`; khong truyen thi
+    compare chay M15-only nhu cu (CLI `compare --source history`
+    hien chua load bar trend — xem bao cao tich hop).
     """
     if not strategy_names:
         raise ValueError("compare_strategies can it nhat 1 chien luoc")
@@ -995,7 +1146,8 @@ def compare_strategies(desk, strategy_names, days=90, *, cfg=None,
             train_bars=train_bars, test_bars=test_bars,
             step_bars=step_bars, fee_pct=fee_pct,
             slippage_pct=slippage_pct, bars=bars,
-            bars_by_symbol=bars_by_symbol, strategy_name=name)
+            bars_by_symbol=bars_by_symbol, strategy_name=name,
+            trend_bars_by_symbol=trend_bars_by_symbol)
         walk_forward[name] = result
         meta = STRATEGY_REGISTRY[name]
         row = {"strategy": result["strategy"],
@@ -1084,7 +1236,8 @@ SWEEP_OVERFIT_GAP_PCT = 5.0
 def sweep_params(desk, bars, strategy_name="default", param_grid=None, *,
                  cfg=None, symbols=None, train_bars=30, test_bars=10,
                  step_bars=10, fee_pct=None, slippage_pct=None,
-                 max_combinations=27, top_n=3, bars_by_symbol=None):
+                 max_combinations=27, top_n=3, bars_by_symbol=None,
+                 trend_bars_by_symbol=None):
     """Quet luoi tham so (nghien cuu — CHONG OVERFITTING o muc nhe).
 
     Moi bo tham so chay walk-forward day du; XEP HANG CHI THEO ket
@@ -1131,7 +1284,8 @@ def sweep_params(desk, bars, strategy_name="default", param_grid=None, *,
             step_bars=step_bars, fee_pct=fee_pct,
             slippage_pct=slippage_pct, bars=bars,
             bars_by_symbol=bars_by_symbol,
-            strategy_name=strategy_name)
+            strategy_name=strategy_name,
+            trend_bars_by_symbol=trend_bars_by_symbol)
         entry = {
             "params": dict(combo),
             "train": _metrics_summary(wf["aggregated_train"]),

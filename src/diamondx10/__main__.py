@@ -1,8 +1,8 @@
 """CLI entry: python3 -m diamondx10 demo | backtest | signals | compare
 | sweep | import-bars | mt5-dry-run | mt5-trade | mt5-symbols
 | backfill | export-bars | live | telegram-listen | telegram-test
-| briefing | verdict | synthesize | publish-post | muse-setup | muse-send | muse-auto.
-| live.
+| briefing | verdict | synthesize | publish-post | muse-setup | muse-send | muse-auto
+| evaluate-signals | live | ai-setup | ai-train | ai-tune.
 
 Lenh mt5-* va live CHI dung voi tai khoan DEMO (Exness demo + MT5 terminal).
 Xem docs/mt5-demo.md va docs/live-loop.md truoc khi chay.
@@ -12,7 +12,6 @@ Lenh backfill / export-bars lay nen OHLC tu MT5 vao kho SQLite local
 import argparse
 import csv
 import os
-import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -39,12 +38,14 @@ from .briefing import (
     cmd_briefing,
 )
 from .newsfeed import NewsCardStore
+from . import evaluator as evaluator_mod
 from . import killswitch
 from . import telegram as telegram_mod
 from .data.csv_import import import_csv_bars
 from .config import load_config
 from .data.feeds import SimulatedFeed
 from .data.history import HistoryStore
+from .data.multitimeframe import configured_stack, parse_timeframes
 from .data.news import format_news_report, run_news
 from .data.providers import build_feed
 from .decisions import log_decision
@@ -52,6 +53,7 @@ from .execution import account_is_demo, check_symbols_available
 from .muse_browser import (
     DEFAULT_WAIT_MIN,
     MuseBrowserError,
+    install_playwright,
     send_briefing,
     wait_for_verdict,
 )
@@ -112,47 +114,278 @@ def cmd_telegram_test(cfg):
     return 1
 
 
+def cmd_evaluate_signals(cfg, outcomes=None, evaluated=None, window=None,
+                         *, store=None):
+    """Lenh CLI `evaluate-signals`: danh gia ket qua tin hieu da ghi.
+
+    Tra 0 neu danh gia duoc it nhat 1 ban ghi moi, hoac neu tat ca ban
+    ghi da duoc danh gia truoc do; tra 1 (khong traceback) neu khong co
+    gi de danh gia (thieu / rong file ket qua) hoac khong co bar lich su
+    nao cho cac tin hieu can danh gia (chay `backfill` truoc). store:
+    diem tiem kho lich su cho test (mac dinh mo theo config).
+    """
+    from .evaluator import DEFAULT_EVALUATED, DEFAULT_OUTCOMES
+    outcomes_path = (Path(outcomes) if outcomes is not None
+                     else DEFAULT_OUTCOMES)
+    evaluated_path = (Path(evaluated) if evaluated is not None
+                      else DEFAULT_EVALUATED)
+    if (not outcomes_path.exists()
+            or outcomes_path.stat().st_size == 0):
+        print("Khong co gi de danh gia: khong tim thay file ket qua tin "
+              f"hieu ({outcomes_path}) hoac file rong.")
+        return 1
+    own_store = store is None
+    if own_store:
+        store = _history_store(cfg)
+    try:
+        summary = evaluator_mod.evaluate(
+            outcomes_path, store, cfg, evaluated_path=evaluated_path,
+            window_bars=window)
+    finally:
+        if own_store:
+            close = getattr(store, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001 — dong kho loi thi thoi
+                    pass
+    print(f"Danh gia tin hieu: moi {summary['evaluated']}, da danh gia "
+          f"truoc {summary['skipped_already']}, thieu bar "
+          f"{summary['skipped_no_bars']}, loi {summary['skipped_bad']}; "
+          f"thang {summary['wins']}, thua {summary['losses']}, het han "
+          f"{summary['timeouts']}. Ghi ra {evaluated_path}")
+    if summary["evaluated"] > 0:
+        return 0
+    if (summary["skipped_already"] > 0
+            and summary["skipped_no_bars"] == 0
+            and summary["skipped_bad"] == 0):
+        return 0
+    if summary["skipped_no_bars"] > 0:
+        print("LOI: khong co bar lich su cho cac tin hieu can danh gia — "
+              "chay backfill truoc roi chay lai evaluate-signals.")
+    else:
+        print("LOI: khong danh gia duoc ban ghi moi nao (xem so luong "
+              "thieu bar / loi o tren).")
+    return 1
+
+
+def cmd_ta_review(cfg, evaluated=None, proposals=None, no_proposals=False,
+                  apply_path=None, *, confirm=None):
+    """Lenh CLI `ta-review`: bao cao bai hoc + de xuat tinh chinh TA.
+
+    Tra 0 khi in duoc bao cao (va ghi file de xuat neu khong
+    --no-proposals); tra 1 (khong traceback) khi file da danh gia
+    thieu / rong / khong co ban ghi nao. Che do --apply thi khong
+    can file da danh gia: in diff, hoi go chu "APPLY" roi moi doi
+    config.yaml LOCAL. confirm: diem tiem cho test — truyen
+    "APPLY" de ap ma khong hoi; None thi hoi qua input().
+    """
+    from .ta_review import (
+        DEFAULT_EVALUATED,
+        apply_proposals,
+        format_report,
+        load_evaluated_records,
+        propose,
+        review,
+        write_proposals,
+    )
+    if apply_path is not None:
+        try:
+            changed, skipped = apply_proposals(
+                apply_path, Path("config.yaml"), confirm=confirm)
+        except (ValueError, FileNotFoundError, OSError) as exc:
+            print(f"LOI: {exc}")
+            return 1
+        if changed:
+            print(f"Da ap {len(changed)} thay doi vao config.yaml.")
+            return 0
+        print("Khong ap thay doi nao.")
+        return 1 if not skipped else 0
+    evaluated_path = (Path(evaluated) if evaluated is not None
+                      else DEFAULT_EVALUATED)
+    if (not evaluated_path.exists()
+            or evaluated_path.stat().st_size == 0):
+        print("Khong co gi de xem xet: khong tim thay file da danh gia "
+              f"({evaluated_path}) hoac file rong — chay "
+              "evaluate-signals truoc.")
+        return 1
+    try:
+        records, bad_lines = load_evaluated_records(evaluated_path)
+    except OSError as exc:
+        print(f"LOI: khong doc duoc file da danh gia ({exc})")
+        return 1
+    if not records:
+        print("LOI: file da danh gia khong co ban ghi nao.")
+        return 1
+    if bad_lines:
+        print(f"Canh bao: bo qua {bad_lines} dong loi trong file da "
+              "danh gia.")
+    report = review(records, cfg)
+    print(format_report(report))
+    if no_proposals:
+        return 0
+    proposals_list = propose(report, records, cfg)
+    if proposals is None:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+        proposals = (Path("decisions")
+                     / f"ta-tuning-proposals-{stamp}.yaml")
+    proposals_path = Path(proposals)
+    write_proposals(proposals_list, proposals_path)
+    print(f"\nDe xuat tinh chinh ({len(proposals_list)} de xuat): "
+          f"ghi ra {proposals_path}")
+    for proposal in proposals_list:
+        oos = proposal.get("oos_validation") or {}
+        status = ("DA KIEM CHUNG OOS" if oos.get("validated")
+                  else "CHUA KIEM CHUNG — KHONG SAN SANG AP DUNG")
+        print(f"  - {proposal['symbol']} {proposal['param_or_rule']}: "
+              f"{proposal.get('current_value')} -> "
+              f"{proposal.get('proposed_value')} [{status}]")
+    return 0
+
+
 def cmd_muse_setup():
     """Cai Playwright + Chromium cho lenh muse-send. Tra 0 neu xong,
     1 neu cai that (in huong dan, khong traceback).
 
-    OPT-IN: khong goi tu quickstart — user tu chay khi muon dung
-    trinh duyet Muse.
+    Cach cai TAY: chay lenh nay de (re)install. Quickstart cung goi
+    helper dung chung (ensure_muse_browser_ready trong muse_browser)
+    o buoc 1 de dam bao Playwright + Chromium san sang truoc khi
+    chay muse-auto; lenh nay van la cach cai lai bang tay. Cai dat
+    thuc te nam o muse_browser.install_playwright (lenh nay chi in
+    dong mo dau roi goi no) de CLI va quickstart dung chung 1 ban
+    cai dat, output giong het nhu cu.
     """
     print("Cai Playwright + Chromium cho Muse browser ...")
-    try:
-        pip = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "playwright"])
-    except OSError as exc:
-        print(f"LOI: khong chay duoc pip: {exc}")
-        print("Huong dan: cai Python 3.10+ roi chay lai "
-              "python -m diamondx10 muse-setup")
+    return 0 if install_playwright() else 1
+
+
+def cmd_ai_setup():
+    """Cai torch CPU + numpy + pandas cho mo hinh AI (lenh ai-setup).
+
+    Giong cmd_muse_setup: cai dat that nam o ai/model.py
+    (install_torch), lenh nay chi goi no. Tra 0 neu xong, 1 neu
+    cai that (khong traceback). Khong nam trong requirements.txt,
+    quickstart KHONG tu cai.
+    """
+    from .ai.model import install_torch
+    return 0 if install_torch() else 1
+
+
+def _ai_symbols(cfg, symbol, all_symbols):
+    """Symbol cho ai-train / ai-tune: --symbol > --all > loi sach."""
+    if symbol:
+        return [symbol]
+    if all_symbols:
+        return _all_symbols(cfg)
+    print("LOI: truyen --symbol SYMBOL hoac --all (vd: ai-train "
+          "--symbol EURUSD --days 90).")
+    return None
+
+
+def cmd_ai_train(cfg, symbol=None, all_symbols=False, days=90, epochs=50,
+                 source="history", no_promote=False, models_dir=None):
+    """Lenh CLI `ai-train`: train mo hinh outcome GRU cho 1 symbol
+    hoac tat ca symbol (mo hinh hoc P(ket qua | context, params)
+    de chinh tham so TA — xem docs/ai-ta-model.md).
+
+    Tra 0 neu train xong it nhat 1 symbol, 1 neu torch chua cai
+    (huong ve ai-setup, khong traceback), khong co bar, hoac
+    symbol nao loi. Moi symbol in bao cao OOS + ket qua gate.
+    models_dir: diem tiem cho test (None = config ai.models_dir).
+    """
+    from .ai.model import TorchNotAvailable
+    from .ai.train import format_report, train as train_model
+    symbols = _ai_symbols(cfg, symbol, all_symbols)
+    if symbols is None:
         return 1
-    if pip.returncode != 0:
-        print("LOI: pip install playwright that bai (xem loi pip o tren).")
-        print("Huong dan: kiem tra mang / quyen ghi, roi chay lai "
-              "python -m diamondx10 muse-setup")
+    failed = 0
+    for sym in symbols:
+        try:
+            report = train_model(cfg, sym, days=days, epochs=epochs,
+                                 source=source, promote=not no_promote,
+                                 models_dir=models_dir)
+        except TorchNotAvailable as exc:
+            print(f"LOI: {exc}")
+            return 1
+        except Exception as exc:  # noqa: BLE001 — lenh CLI khong traceback
+            print(f"LOI ({sym}): {exc}")
+            failed += 1
+            continue
+        print(format_report(report))
+    if failed:
+        print(f"Co {failed}/{len(symbols)} symbol train loi.")
         return 1
-    try:
-        browser = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"])
-    except OSError as exc:
-        print(f"LOI: khong chay duoc playwright: {exc}")
+    return 0
+
+
+def cmd_ai_tune(cfg, symbol=None, all_symbols=False, days=90,
+                source="history", top_k=3, rank_bars=2000, min_trades=5,
+                min_oos_n=None, models_dir=None):
+    """Lenh CLI `ai-tune`: xep hang bo tham so ung vien bang mo
+    hinh outcome -> kiem chung OOS walk-forward -> ghi de xuat
+    (chi ung vien QUA kiem chung) ra file ta-tuning-proposals.
+
+    Can mo hinh da train (chay ai-train truoc); thieu file mo hinh
+    thi bao loi sach. KHONG BAO GIO tu doi config — de xuat ap
+    bang `ta-review --apply` (go APPLY). Tra 0 neu chay xong it
+    nhat 1 symbol (ke ca khi khong co de xuat nao), 1 neu loi.
+    models_dir: diem tiem cho test (None = config ai.models_dir).
+    """
+    from .ai.model import (
+        TorchNotAvailable,
+        load_model,
+        model_paths,
+        resolve_models_dir,
+    )
+    from .ai.tune import load_history_bars, tune_symbol
+    symbols = _ai_symbols(cfg, symbol, all_symbols)
+    if symbols is None:
         return 1
-    if browser.returncode != 0:
-        print("LOI: playwright install chromium that bai (xem loi o tren).")
-        print("Huong dan: kiem tra mang roi chay lai "
-              "python -m diamondx10 muse-setup")
+    failed = 0
+    models_dir = resolve_models_dir(cfg, models_dir)
+    for sym in symbols:
+        pt_path, json_path = model_paths(sym, models_dir)
+        if not pt_path.exists() or not json_path.exists():
+            print(f"LOI ({sym}): chua co mo hinh outcome — chay "
+                  f"python -m diamondx10 ai-train --symbol {sym} "
+                  "--days 90 truoc.")
+            failed += 1
+            continue
+        try:
+            model, sidecar = load_model(pt_path, json_path)
+            bars = load_history_bars(cfg, sym, days=days, source=source)
+            report = tune_symbol(
+                cfg, sym, bars, model, sidecar, top_k=top_k,
+                rank_bars=rank_bars, min_trades=min_trades,
+                min_oos_n=min_oos_n)
+        except TorchNotAvailable as exc:
+            print(f"LOI: {exc}")
+            return 1
+        except Exception as exc:  # noqa: BLE001 — lenh CLI khong traceback
+            print(f"LOI ({sym}): {exc}")
+            failed += 1
+            continue
+        print(f"== AI-TUNE {sym} ==")
+        for row in report["ranked"]:
+            print(f"  {row['candidate']}: win rate du doan "
+                  f"{row['mean_p_tp']:.1%} "
+                  f"({row['n_windows']} lenh du doan)")
+        for row in report["filtered"]:
+            print(f"  (loai) {row['candidate']}: "
+                  f"{row.get('filter_reason')}")
+        for row in report["rejected"]:
+            print(f"  (khong qua OOS) {row['candidate']}: "
+                  f"{row.get('reject_reason')}")
+        if report["proposals"]:
+            print(f"  OK: {len(report['proposals'])} de xuat — ghi ra "
+                  f"{report['proposals_path']} (CHUA AP DUNG; ap bang "
+                  "ta-review --apply, go APPLY).")
+        else:
+            print("  Khong co de xuat nao qua kiem chung OOS — "
+                  "giu tham so hien tai.")
+    if failed:
+        print(f"Co {failed}/{len(symbols)} symbol tune loi.")
         return 1
-    print("OK: da cai Playwright + Chromium.")
-    print("Buoc tiep theo:")
-    print("  1. Chay headed 1 lan de dang nhap (khong --headless):")
-    print("       python -m diamondx10 muse-send --file "
-          "briefings/briefing-forex-<ngay>.md --no-wait")
-    print("  2. Dang nhap vao muse.ai TAY trong cua so trinh duyet mo ra")
-    print("     (khong nhap mat khau vao tool), mo chat chinh cua Muse.")
-    print("  3. Chay lai muse-send (khong --no-wait) de gui briefing va "
-          "doi verdict.")
     return 0
 
 
@@ -344,6 +577,32 @@ def _load_bars_by_symbol(cfg, desk, symbols, timeframe):
     return out
 
 
+def _load_trend_bars_by_symbol(cfg, desk, symbols):
+    """Doc bar trend (vd H1) cho cac symbol tu kho lich su (MTF v1).
+
+    Dung cho compare/sweep --source history. Khong bao gio raise khi
+    thieu bar trend: symbol nao thieu thi bo qua (loc HTF khong ap dung
+    cho symbol do — backtest chay M15-only kem canh bao). Tra {} khi
+    loc tat (thieu muc timeframes: hoac trend_enabled false).
+    """
+    from .multitimeframe import resolve_timeframes
+
+    tf_cfg = resolve_timeframes(cfg)
+    if not tf_cfg["trend_enabled"]:
+        return {}
+    symbols = symbols or _desk_symbols(cfg, desk, None)
+    out = {}
+    with _history_store(cfg) as store:
+        for symbol in symbols:
+            bars = store.get_bars(symbol, tf_cfg["trend"])
+            if bars:
+                out[symbol] = bars
+            else:
+                print(f"Canh bao MTF: kho lich su chua co bar "
+                      f"{tf_cfg['trend']} cho {symbol} — chay M15-only.")
+    return out
+
+
 def _all_symbols(cfg):
     """Tat ca symbol cua ca 4 desk, theo thu tu trong config."""
     symbols = []
@@ -406,6 +665,19 @@ def _close_feed(feed):
             close()
         except Exception:  # noqa: BLE001 — dong feed khong duoc thi thoi
             pass
+
+
+def _resolve_backfill_timeframes(cfg, args):
+    """Khung nen cho backfill, theo thu tu uu tien:
+    --all-timeframes > --timeframes > --timeframe > config
+    (history.default_timeframe). Tra list khung (it nhat 1).
+    Gia tri xau trong --timeframes thi raise ValueError neu ten no."""
+    if args.all_timeframes:
+        return configured_stack(cfg)
+    if args.timeframes:
+        return parse_timeframes(args.timeframes)
+    hist = _history_cfg(cfg)
+    return [args.timeframe or hist.get("default_timeframe", "M15")]
 
 
 def run_backfill(cfg, symbols, timeframe, days, store=None,
@@ -826,6 +1098,57 @@ def main(argv=None):
     ma.add_argument("--headed", dest="headless", action="store_false",
                     help="mo cua so trinh duyet that (dung khi dang nhap "
                          "lan dau hoac muon nhin thay)")
+    ai_s = sub.add_parser("ai-setup",
+                          help="cai torch CPU + numpy + pandas cho mo "
+                               "hinh AI (chay 1 lan, ~250MB)")
+    ai_t = sub.add_parser("ai-train",
+                          help="train mo hinh outcome GRU cho 1 symbol "
+                               "hoac tat ca (hoc P(ket qua | context, "
+                               "tham so) de chinh tham so TA — xem "
+                               "docs/ai-ta-model.md)")
+    ai_t.add_argument("--symbol", default=None,
+                      help="chi train 1 symbol (vd EURUSD)")
+    ai_t.add_argument("--all", action="store_true",
+                      help="train tat ca 10 symbol")
+    ai_t.add_argument("--days", type=int, default=90,
+                      help="so ngay lich su gan nhat (mac dinh 90)")
+    ai_t.add_argument("--epochs", type=int, default=50,
+                      help="so epoch toi da (mac dinh 50, early "
+                           "stopping patience 5)")
+    ai_t.add_argument("--source", default="history",
+                      choices=["history", "simulated"],
+                      help="nguon bar: history (mac dinh — kho SQLite, "
+                           "can backfill truoc) | simulated (demo/test)")
+    ai_t.add_argument("--no-promote", action="store_true",
+                      help="chi train, khong ghi file mo hinh du gate "
+                           "thang")
+    ai_u = sub.add_parser("ai-tune",
+                          help="xep hang bo tham so ung vien bang mo "
+                               "hinh outcome -> kiem chung OOS "
+                               "walk-forward -> ghi de xuat ta-review "
+                               "(KHONG tu ap config)")
+    ai_u.add_argument("--symbol", default=None,
+                      help="chi tune 1 symbol (vd EURUSD)")
+    ai_u.add_argument("--all", action="store_true",
+                      help="tune tat ca 10 symbol")
+    ai_u.add_argument("--days", type=int, default=90,
+                      help="so ngay lich su gan nhat (mac dinh 90)")
+    ai_u.add_argument("--source", default="history",
+                      choices=["history", "simulated"],
+                      help="nguon bar: history (mac dinh) | simulated "
+                           "(demo/test)")
+    ai_u.add_argument("--top", type=int, default=3,
+                      help="so ung vien hang dau dem kiem chung OOS "
+                           "(mac dinh 3)")
+    ai_u.add_argument("--rank-bars", type=int, default=2000,
+                      help="so bar gan nhat dung de xep hang ung vien "
+                           "(mac dinh 2000)")
+    ai_u.add_argument("--min-trades", type=int, default=5,
+                      help="so lenh du doan toi thieu moi xep hang "
+                           "(mac dinh 5)")
+    ai_u.add_argument("--min-oos-n", type=int, default=None,
+                      help="so lenh OOS toi thieu moi duoc de xuat "
+                           "(mac dinh: learning.min_sample_for_proposal)")
     vd = sub.add_parser("verdict",
                         help="luu nhan dinh co ban (PTCB) cua 1 desk tu file JSON")
     vd.add_argument("--file", required=True,
@@ -883,6 +1206,14 @@ def main(argv=None):
     bf.add_argument("--timeframe", default=None,
                     help="khung nen: M15, H1, D1 (mac dinh: "
                          "history.default_timeframe trong config)")
+    bf.add_argument("--timeframes", default=None,
+                    help="nhieu khung nen, cach nhau bang dau phay, vd "
+                         "M15,H1 (ghi de --timeframe)")
+    bf.add_argument("--all-timeframes", action="store_true",
+                    help="backfill ca stack da cau hinh: entry + trend "
+                         "(neu bat) + timing (neu bat), theo muc "
+                         "timeframes trong config (ghi de --timeframe / "
+                         "--timeframes)")
     bf.add_argument("--days", type=int, default=None,
                     help="so ngay gan nhat (mac dinh: history.backfill_days)")
     e = sub.add_parser("export-bars",
@@ -902,6 +1233,36 @@ def main(argv=None):
                    help="nguon du lieu: store (mac dinh — tu kho, thieu "
                         "thi keo MT5), mt5 (luon keo live), simulated "
                         "(mo phong, chi de demo/test)")
+    ev = sub.add_parser("evaluate-signals",
+                        help="danh gia ket qua tin hieu da ghi "
+                             "(thang/thua/het han) tren nen that trong kho "
+                             "lich su (can backfill truoc)")
+    ev.add_argument("--outcomes", default=None,
+                    help="file JSONL ket qua tin hieu (mac dinh "
+                         "decisions/signal-outcomes.jsonl)")
+    ev.add_argument("--evaluated", default=None,
+                    help="file JSONL dich (mac dinh decisions/"
+                         "signal-outcomes-evaluated.jsonl)")
+    ev.add_argument("--window", type=int, default=None,
+                    help="so bar M15 toi da xet moi tin hieu (mac dinh: "
+                         "muc learning.outcome_window_bars trong config, "
+                         "neu khong co thi 20)")
+    tr = sub.add_parser("ta-review",
+                        help="xem bai hoc + de xuat tinh chinh TA tu ket "
+                             "qua tin hieu da danh gia (khong tu doi "
+                             "config — chi de xuat)")
+    tr.add_argument("--evaluated", default=None,
+                    help="file JSONL da danh gia (mac dinh decisions/"
+                         "signal-outcomes-evaluated.jsonl)")
+    tr.add_argument("--proposals", default=None,
+                    help="file YAML ghi de xuat (mac dinh decisions/"
+                         "ta-tuning-proposals-<ngay-gio>.yaml)")
+    tr.add_argument("--no-proposals", action="store_true",
+                    help="chi in bao cao, khong ghi file de xuat")
+    tr.add_argument("--apply", default=None, metavar="PATH",
+                    help="ap file de xuat vao config.yaml LOCAL: in diff "
+                         "roi hoi go chu APPLY moi doi (khong bao gio ap "
+                         "vao config.example.yaml)")
     args = p.parse_args(argv)
     cfg = load_config()
     if args.cmd == "demo":
@@ -957,15 +1318,20 @@ def main(argv=None):
     elif args.cmd == "compare":
         try:
             bars_by_symbol = None
+            trend_bars_by_symbol = None
             if args.source == "history":
                 bars_by_symbol = _load_bars_by_symbol(
                     cfg, args.desk,
                     [args.symbol] if args.symbol else None, args.timeframe)
+                trend_bars_by_symbol = _load_trend_bars_by_symbol(
+                    cfg, args.desk,
+                    [args.symbol] if args.symbol else None)
             comp = compare_strategies(
                 args.desk, args.strategies, days=args.days, cfg=cfg,
                 symbols=[args.symbol] if args.symbol else None,
                 train_bars=args.train_bars, test_bars=args.test_bars,
-                step_bars=args.step_bars, bars_by_symbol=bars_by_symbol)
+                step_bars=args.step_bars, bars_by_symbol=bars_by_symbol,
+                trend_bars_by_symbol=trend_bars_by_symbol)
             print(format_strategy_comparison(comp))
         except ValueError as exc:
             print(f"LOI: {exc}")
@@ -976,12 +1342,16 @@ def main(argv=None):
                 bars_by_symbol = _load_bars_by_symbol(
                     cfg, args.desk,
                     [args.symbol] if args.symbol else None, args.timeframe)
+                trend_bars_by_symbol = _load_trend_bars_by_symbol(
+                    cfg, args.desk,
+                    [args.symbol] if args.symbol else None)
                 sw = sweep_params(
                     args.desk, None, args.strategy, cfg=cfg,
                     symbols=[args.symbol] if args.symbol else None,
                     train_bars=args.train_bars, test_bars=args.test_bars,
                     step_bars=args.step_bars,
-                    bars_by_symbol=bars_by_symbol)
+                    bars_by_symbol=bars_by_symbol,
+                    trend_bars_by_symbol=trend_bars_by_symbol)
             else:
                 bars = SimulatedFeed(args.desk).bars(args.days)
                 sw = sweep_params(
@@ -1077,21 +1447,38 @@ def main(argv=None):
             print(f"LOI: {exc}")
             return 1
         hist = _history_cfg(cfg)
-        timeframe = args.timeframe or hist.get("default_timeframe", "M15")
+        try:
+            timeframes = _resolve_backfill_timeframes(cfg, args)
+        except ValueError as exc:
+            print(f"LOI: {exc}")
+            return 1
         days = (args.days if args.days is not None
                 else int(hist.get("backfill_days", 90)))
         print(f"DiamondX10 — backfill MT5 DEMO: {', '.join(symbols)}, "
-              f"{timeframe}, {days} ngay gan nhat")
+              f"{', '.join(timeframes)}, {days} ngay gan nhat")
+        total_bars, failed, ok = 0, 0, 0
         try:
-            result = run_backfill(cfg, symbols, timeframe, days)
+            for timeframe in timeframes:
+                result = run_backfill(cfg, symbols, timeframe, days)
+                total_bars += result["total_bars"]
+                failed += result["failed"]
+                ok += len(result["results"])
         except (ImportError, ValueError) as exc:
             print(f"LOI: {exc}")
             return 1
-        print(f"Xong backfill: {result['total_bars']} bar da luu, "
-              f"{len(result['results'])}/{len(symbols)} symbol OK.")
-        if result["failed"]:
-            print(f"Co {result['failed']}/{len(symbols)} symbol loi.")
-            return 1
+        if len(timeframes) == 1:
+            print(f"Xong backfill: {total_bars} bar da luu, "
+                  f"{ok}/{len(symbols)} symbol OK.")
+            if failed:
+                print(f"Co {failed}/{len(symbols)} symbol loi.")
+                return 1
+        else:
+            print(f"Xong backfill: {total_bars} bar da luu, "
+                  f"{ok}/{len(symbols) * len(timeframes)} symbol-khung OK.")
+            if failed:
+                print(f"Co {failed}/{len(symbols) * len(timeframes)} "
+                      "symbol-khung loi.")
+                return 1
     elif args.cmd == "export-bars":
         try:
             symbols = _resolve_history_symbols(cfg, args.desk, args.symbol)
@@ -1116,6 +1503,15 @@ def main(argv=None):
         if result["failed"]:
             print(f"Co {result['failed']}/{len(symbols)} symbol loi.")
             return 1
+    elif args.cmd == "evaluate-signals":
+        return cmd_evaluate_signals(cfg, outcomes=args.outcomes,
+                                    evaluated=args.evaluated,
+                                    window=args.window)
+    elif args.cmd == "ta-review":
+        return cmd_ta_review(cfg, evaluated=args.evaluated,
+                             proposals=args.proposals,
+                             no_proposals=args.no_proposals,
+                             apply_path=args.apply)
     elif args.cmd == "live":
         # Vong lap live (Phase D): 1 chu ky (--once) hoac lap toi bien nen
         # tiep theo toi khi Ctrl+C. CHI TAI KHOAN DEMO; tren may khong co
@@ -1179,6 +1575,20 @@ def main(argv=None):
         return cmd_muse_auto(cfg, desk=args.desk, all_desks=args.all,
                              wait_min=args.wait_min,
                              headless=args.headless)
+    elif args.cmd == "ai-setup":
+        return cmd_ai_setup()
+    elif args.cmd == "ai-train":
+        return cmd_ai_train(cfg, symbol=args.symbol,
+                            all_symbols=args.all, days=args.days,
+                            epochs=args.epochs, source=args.source,
+                            no_promote=args.no_promote)
+    elif args.cmd == "ai-tune":
+        return cmd_ai_tune(cfg, symbol=args.symbol,
+                           all_symbols=args.all, days=args.days,
+                           source=args.source, top_k=args.top,
+                           rank_bars=args.rank_bars,
+                           min_trades=args.min_trades,
+                           min_oos_n=args.min_oos_n)
     elif args.cmd == "verdict":
         return cmd_verdict(cfg, args.file)
     elif args.cmd == "synthesize":

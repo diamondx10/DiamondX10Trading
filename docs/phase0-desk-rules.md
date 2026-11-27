@@ -18,6 +18,16 @@
 > Bài nghiên cứu hiện chỉ có khung lý thuyết, chưa có con số cụ thể —
 > trừ Forex của Yuling: "SMA ngắn vượt SMA dài và RSI không quá mua thì
 > mới xem xét mua; cắt lỗ theo ATR".
+>
+> **Cập nhật 2026-11-27 — bảng per-symbol đã thay các quy tắc chung
+> dưới đây:** các bảng kỹ thuật trong file này ghi quy tắc chung
+> Phase 0 (SMA5/20 + RSI 50–70 cho mọi desk). Từ 2026-11-27,
+> `strategy.per_symbol` trong `config.example.yaml` ghi đè theo
+> symbol (EURUSD 8/21, XAUUSD 10/30 + RSI 55–75, BTC/ETH 9/21,
+> NVDA/AMD/INTC riêng, CDNS/SNPS giữ mặc định chung — xem
+> `docs/per-symbol-ta.md`, `docs/trading-principles.md` mục 61–62).
+> Khi hai chỗ khác nhau thì **bảng per-symbol là bản đang chạy**;
+> các bảng dưới đây giữ nguyên như hồ sơ Phase 0.
 
 ## Quy tắc chung đã chốt (không thảo luận lại ở đây)
 
@@ -258,8 +268,12 @@ Phương án giữ 5% (SL 5% / TP 5%, tỉ lệ 1:1): **đã bị thay thế.**
 - **Hạ rủi ro desk vàng (2–3% thay cho 10%):** chỉ quyết sau khi có số
   ATR thật từ MT5 demo — Phase 1 lấy số, Phase 3 backtest kiểm chứng.
 - **Tách quy tắc riêng theo symbol** (ngưỡng RSI riêng cho vàng, tách
-  BTC/ETH/BNB, tách NVDA): mặc định dùng chung; chỉ tách khi backtest
-  (Phase 3) cho thấy cần.
+  BTC/ETH/BNB, tách NVDA): **ĐÃ XONG 2026-11-27** — bang
+  `strategy.per_symbol` trong `config.example.yaml` (xem
+  `docs/per-symbol-ta.md`, quy tac 61); mac dinh chung chi con dung
+  cho CDNS/SNPS va nhung truong khong ghi de. Luu y: bang nay la
+  diem xuat phat theo tai lieu/thuc hanh, chua kiem chung tren du
+  lieu that — kiem chung bang walk-forward OOS van cho o muc tren.
 - **Danh sách sự kiện cấm giao dịch:** mặc định rỗng; Phu/Kathy bổ sung
   CPI/FOMC/NFP/lịch earnings cụ thể vào config khi có lịch.
 - **Ứng viên từ repo DiamondX10 cũ (merge 2026-11-27 — chưa chốt,
