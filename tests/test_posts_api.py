@@ -28,36 +28,89 @@ from diamondx10 import webapi
 
 
 # --- HTTP helper (stdlib) ---
+# Moi /api/* (tru /api/auth/*) doi cookie phien: fixture `base` dang
+# nhap 1 lan bang OTP doc trong process (xem _signin) roi _get/_post
+# tu kem cookie do. _req_full tra them headers de doc Set-Cookie.
 
-def _req(base, method, path, payload=None):
+_AUTH_HEADERS = {}
+
+
+def _req_full(base, method, path, payload=None, headers=None):
     data = None
-    headers = {}
+    req_headers = dict(headers or {})
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
+        req_headers["Content-Type"] = "application/json"
     request = urllib.request.Request(base + path, data=data,
-                                     headers=headers, method=method)
+                                     headers=req_headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=10) as resp:
             body = resp.read().decode("utf-8")
             ctype = resp.headers.get("Content-Type") or ""
             if "application/json" in ctype:
-                return resp.status, json.loads(body)
-            return resp.status, body
+                return resp.status, json.loads(body), resp.headers
+            return resp.status, body, resp.headers
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8")
         try:
-            return exc.code, json.loads(body)
+            return exc.code, json.loads(body), exc.headers
         except ValueError:
-            return exc.code, body
+            return exc.code, body, exc.headers
 
 
-def _get(base, path):
-    return _req(base, "GET", path)
+def _req(base, method, path, payload=None, headers=None):
+    status, body, _ = _req_full(base, method, path, payload, headers)
+    return status, body
 
 
-def _post(base, path, payload=None):
-    return _req(base, "POST", path, payload if payload is not None else {})
+def _get(base, path, headers=None):
+    return _req(base, "GET", path,
+                headers=_AUTH_HEADERS if headers is None else headers)
+
+
+def _post(base, path, payload=None, headers=None):
+    return _req(base, "POST", path, payload if payload is not None else {},
+                headers=_AUTH_HEADERS if headers is None else headers)
+
+
+def _signin(base, application):
+    """Dang nhap bang OTP: gia Telegram gui duoc, doc ma OTP trong
+    process qua app.state.otp_manager.peek_otp(), verify, tra header
+    Cookie de goi cac route duoc bao ve."""
+    from diamondx10 import telegram as telegram_mod
+    orig_send = telegram_mod.send_message
+    orig_status = telegram_mod.setup_status
+    telegram_mod.send_message = lambda *a, **k: True
+    telegram_mod.setup_status = lambda cfg: {
+        "ready": True, "enabled": True, "has_token": True,
+        "has_chat_id": True, "missing": []}
+    try:
+        # File test khac co the da yeu cau OTP tren cung app module
+        # trong vong 15 giay truoc: gap 429 thi cho het cooldown roi
+        # thu lai (chi xay ra khi chay nhieu file trong 1 process).
+        for _attempt in range(3):
+            status, body, _ = _req_full(
+                base, "POST", "/api/auth/request-otp", {}, headers={})
+            if status == 200:
+                break
+            if status == 429:
+                time.sleep(int(body.get("retry_after") or 15) + 0.2)
+                continue
+            break
+        assert status == 200, body
+        assert body == {"sent": True}
+        code = application.state.otp_manager.peek_otp()
+        assert code is not None
+        status, body, headers = _req_full(
+            base, "POST", "/api/auth/verify-otp", {"code": code},
+            headers={})
+        assert status == 200, body
+    finally:
+        telegram_mod.send_message = orig_send
+        telegram_mod.setup_status = orig_status
+    cookie = (headers.get("Set-Cookie") or "").split(";")[0].strip()
+    assert cookie.startswith("dx10_session=")
+    return {"Cookie": cookie}
 
 
 def _free_port():
@@ -80,7 +133,8 @@ def _run_server(application):
     deadline = time.time() + 15
     while time.time() < deadline:
         try:
-            status, _ = _get(base, "/api/status")
+            # /api/auth/status khong doi dang nhap (dung de doi server).
+            status, _ = _get(base, "/api/auth/status", headers={})
             if status == 200:
                 break
         except Exception:  # noqa: BLE001 — cho server len
@@ -99,6 +153,7 @@ def _run_server(application):
 @pytest.fixture(scope="module")
 def base():
     url, stop = _run_server(app)
+    _AUTH_HEADERS.update(_signin(url, app))
     yield url
     stop()
 

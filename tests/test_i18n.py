@@ -586,3 +586,26 @@ def test_session_expired_alert_both_languages():
     assert session_expired_alert(cfg={"language": "vi"}) == vi
     assert session_expired_alert(cfg={}) == vi  # mac dinh vi
     assert session_expired_alert(cfg={"language": "en"}) == en
+
+
+# --- (f) WebUI: ma OTP dang nhap -------------------------------------
+
+def test_auth_otp_message_both_languages():
+    """Khoa auth.otp_message co ca 2 ngon ngu, dung placeholder, ban
+    tieng Viet co dau (test day du chung da bao phu, day la kiem tra
+    rieng cho khoa moi)."""
+    assert "auth.otp_message" in STRINGS["vi"]
+    assert "auth.otp_message" in STRINGS["en"]
+    vi = t("auth.otp_message", "vi", code="123456", seconds=60)
+    assert "123456" in vi
+    assert "60" in vi
+    assert "Mã đăng nhập của bạn" in vi
+    assert "Không chia sẻ mã này" in vi
+    en = t("auth.otp_message", "en", code="123456", seconds=60)
+    assert "123456" in en
+    assert "60" in en
+    assert "Your sign-in code" in en
+    assert "Never share this code" in en
+    # Ban tieng Viet khong lan tieng Anh cua ban en.
+    assert "Your sign-in code" not in vi
+    assert "Mã đăng nhập" not in en

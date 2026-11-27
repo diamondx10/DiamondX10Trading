@@ -2,9 +2,12 @@
 
 Phuc vu build React (src/diamondx10/static) o / va JSON API o /api/*.
 
-BAO MAT — chi local, KHONG co auth (giong dashboard chi doc):
+BAO MAT — chi local + dang nhap OTP qua Telegram (xem webauth.py):
   - Bind mac dinh 127.0.0.1, KHONG BAO GIO 0.0.0.0. Chi mo cong ra
     ngoai khi biet ro minh dang lam gi.
+  - Moi /api/* (tru /api/auth/request-otp, /api/auth/verify-otp,
+    /api/auth/status) doi cookie phien "dx10_session" hop le; OTP
+    6 chu so gui qua Telegram, TTL 60 giay, dung 1 lan.
   - Khong co token / mat khau trong code hay response; moi lenh dat
     deu qua dung chan nhu nut Telegram (kill switch, demo-only, ky
     quy, do lech entry — xem listener.place_pending_order).
@@ -39,19 +42,28 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import FileResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
     _FASTAPI_ERROR = None
 except ImportError as exc:  # noqa: BLE001 — chay thieu fastapi thi bao ro
     FastAPI = None
     HTTPException = None
+    Request = None
     FileResponse = None
     JSONResponse = None
     StaticFiles = None
     _FASTAPI_ERROR = exc
 
 from . import killswitch, telegram
+from .i18n import t as _i18n_t
+from .webauth import (
+    OTP_TTL_SECONDS,
+    SESSION_COOKIE_NAME,
+    SESSION_MAX_AGE_SECONDS,
+    OTPManager,
+    SessionStore,
+)
 from .briefing import DESK_ANALYSTS, DESKS as BRIEFING_DESKS, build_briefing
 from .config import load_config
 from .dashboard import (
@@ -70,6 +82,7 @@ from .models.quant import atr as _atr
 from .models.quant import rsi as _rsi
 from .pending import PendingOrderStore
 from .posts import PostStore
+from .procman import MANAGED_PROCESSES, ProcessManager
 from .signals import generate_signals
 from .synthesis import (
     cmd_synthesize,
@@ -100,6 +113,9 @@ SUPPORTED_LANGUAGES = ("vi", "en")
 
 # Registry tien trinh live / listener: {name: {"proc", "started", "mode"}}.
 _PROCS = {}
+# Manager bat log cho tien trinh duoc quan ly (live / listener /
+# diagnostics): stdout + stderr vao ring buffer trong bo nho.
+_MANAGER = ProcessManager()
 # Job gui briefing len Muse: {job_id: {"status","verdict","reason"}}.
 _MUSE_JOBS = {}
 _MUSE_JOBS_LOCK = threading.Lock()
@@ -428,14 +444,19 @@ def _fund_status(cfg):
 # --- Quan ly tien trinh live / listener ---
 
 def _spawn_proc(argv):
-    """Chay 1 tien trinh con (diem tiem cho test)."""
+    """Chay 1 tien trinh con (diem tiem cho test).
+
+    stdout/stderr ve PIPE (text, line-buffered) de _MANAGER bat log
+    theo dong; khong dung DEVNULL nua.
+    """
     env = os.environ.copy()
     src_dir = str(REPO_ROOT / "src")
     existing = env.get("PYTHONPATH") or ""
     env["PYTHONPATH"] = src_dir + (os.pathsep + existing if existing else "")
     return subprocess.Popen(
         argv, cwd=str(REPO_ROOT), env=env,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, bufsize=1)
 
 
 def _start_proc(name, argv, mode):
@@ -447,9 +468,13 @@ def _start_proc(name, argv, mode):
         proc = _spawn_proc(argv)
     except Exception as exc:  # noqa: BLE001 — khong chay duoc thi bao ro
         return False, f"khong khoi dong duoc {name}: {exc}"
-    _PROCS[name] = {"proc": proc,
-                    "started": datetime.now(timezone.utc).isoformat(),
-                    "mode": mode}
+    started = datetime.now(timezone.utc).isoformat()
+    _PROCS[name] = {"proc": proc, "started": started, "mode": mode}
+    # Dang ky vao manager TRUOC khi doi 0.3s de bat ca log thoat ngay.
+    try:
+        _MANAGER.register(name, proc, started_utc=started)
+    except Exception:  # noqa: BLE001 — bat log loi thi van chay tien trinh
+        pass
     time.sleep(0.3)
     if proc.poll() is not None:
         return False, (f"{name} thoat ngay (ma {proc.returncode}) — "
@@ -462,6 +487,8 @@ def _stop_proc(name):
     entry = _PROCS.get(name)
     if entry is None:
         return True
+    if _MANAGER.get(name) is not None:
+        return _MANAGER.stop(name)
     proc = entry["proc"]
     if proc.poll() is not None:
         return True
@@ -486,6 +513,21 @@ def _proc_status(name):
         return {"running": False, "mode": None, "started": None}
     return {"running": True, "mode": entry.get("mode"),
             "started": entry.get("started")}
+
+
+def _proc_lines(name, after=0):
+    """Log da bat cua tien trinh `name` sau cursor `after`.
+
+    Tra {"process","running","started_utc","exit_code","lines",
+    "total"} — total la tong so dong trong buffer (de frontend poll
+    tang dan bang after=total). Chua tung chay thi buffer rong.
+    """
+    status = _MANAGER.status(name)
+    total, lines = _MANAGER.lines(name, after=after)
+    return {"process": name, "running": status["running"],
+            "started_utc": status["started_utc"],
+            "exit_code": status["exit_code"],
+            "lines": lines, "total": total}
 
 
 # --- Job gui briefing len Muse ---
@@ -558,6 +600,98 @@ def create_app(static_dir=None):
         print(f"LOI webapi: {exc}")
         return JSONResponse(status_code=500,
                             content={"detail": f"loi server: {exc}"})
+
+    # --- Xac thuc OTP (webauth.py, chi trong bo nho) ---
+    # Moi create_app() co OTPManager + SessionStore rieng: app moi thi
+    # khong co OTP / phien cu. Test doc OTP qua app.state.otp_manager
+    # .peek_otp() (chi trong process, KHONG qua API).
+    otp_manager = OTPManager()
+    session_store = SessionStore()
+    app.state.otp_manager = otp_manager
+    app.state.session_store = session_store
+    _AUTH_EXEMPT = frozenset({
+        "/api/auth/request-otp", "/api/auth/verify-otp",
+        "/api/auth/status"})
+
+    @app.middleware("http")
+    async def _auth_middleware(request, call_next):
+        path = request.url.path
+        if path.startswith("/api/") and path not in _AUTH_EXEMPT:
+            token = request.cookies.get(SESSION_COOKIE_NAME)
+            if not token or not session_store.is_valid(token):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "chua dang nhap — can ma OTP "
+                                       "de dang nhap"})
+        return await call_next(request)
+
+    @app.post("/api/auth/request-otp")
+    def api_auth_request_otp(payload: dict = None):  # noqa: ARG001
+        result = otp_manager.request_otp()
+        if not result["ok"]:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "yeu cau ma qua nhanh — cho chut roi "
+                                   "thu lai",
+                         "retry_after": result["retry_after"]})
+        code = result["code"]
+        cfg = _load_cfg()
+        lang = _resolve_language(cfg)
+        sent = False
+        reason = ""
+        try:
+            if telegram.setup_status(cfg).get("ready"):
+                sent = bool(telegram.send_message(
+                    _i18n_t("auth.otp_message", lang, code=code,
+                            seconds=OTP_TTL_SECONDS),
+                    cfg=cfg))
+                if not sent:
+                    reason = "khong gui duoc qua Telegram"
+            else:
+                reason = "telegram chua cau hinh"
+        except Exception as exc:  # noqa: BLE001 — gui loi thi fallback
+            sent = False
+            reason = f"khong gui duoc qua Telegram: {exc}"
+        if sent:
+            return {"sent": True}
+        # Fallback: in ma ra stdout cua terminal chay server de nguoi
+        # dung doc truc tiep. Chi in ra console, KHONG ghi file/log.
+        print("DX10 MA DANG NHAP (chi hien tren terminal nay, hieu luc "
+              f"60 giay, khong chia se): {code}")
+        return {"sent": False, "fallback": "terminal", "reason": reason}
+
+    @app.post("/api/auth/verify-otp")
+    def api_auth_verify_otp(payload: dict):
+        code = payload.get("code") if isinstance(payload, dict) else None
+        if not isinstance(code, str) or not code.strip():
+            return JSONResponse(status_code=401,
+                                content={"reason": "invalid"})
+        ok, reason = otp_manager.verify_otp(code)
+        if not ok:
+            return JSONResponse(status_code=401,
+                                content={"reason": reason})
+        token = session_store.create()
+        response = JSONResponse(content={"ok": True,
+                                         "authenticated": True})
+        response.set_cookie(SESSION_COOKIE_NAME, token, httponly=True,
+                            samesite="lax", path="/",
+                            max_age=SESSION_MAX_AGE_SECONDS)
+        return response
+
+    @app.post("/api/auth/sign-out")
+    def api_auth_sign_out(request: Request):
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+        if token:
+            session_store.revoke(token)
+        response = JSONResponse(content={"ok": True})
+        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        return response
+
+    @app.get("/api/auth/status")
+    def api_auth_status(request: Request):
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+        return {"authenticated": bool(
+            token and session_store.is_valid(token))}
 
     @app.get("/")
     def index():
@@ -1096,6 +1230,55 @@ def create_app(static_dir=None):
         _stop_proc("listener")
         return {"ok": True}
 
+    # --- Manager console: log tien trinh / diagnostics / telegram-test ---
+
+    @app.get("/api/logs")
+    def api_logs(process: str = "live", after: int = 0):
+        """Log da bat cua 1 tien trinh duoc quan ly.
+
+        ?process=live|listener|diagnostics &after=N (cursor: so dong
+        da doc; tra chi cac dong moi hon + total de poll tang dan).
+        Ten tien trinh la thi 400.
+        """
+        if process not in MANAGED_PROCESSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"process khong hop le: {process!r} "
+                       "(chon live | listener | diagnostics)")
+        return _proc_lines(process, after=after)
+
+    @app.post("/api/diagnostics")
+    def api_diagnostics_start():
+        """Chay test_run.py o che do an toan mac dinh (khong dat lenh)
+        nhu tien trinh "diagnostics" duoc quan ly; log xem o /api/logs
+        ?process=diagnostics. Da chay thi ok:false.
+        """
+        argv = [sys.executable, "test_run.py"]
+        ok, reason = _start_proc("diagnostics", argv, "diagnostics")
+        return {"ok": ok, "reason": reason}
+
+    @app.post("/api/telegram-test")
+    def api_telegram_test():
+        """Gui 1 tin nhan thu qua Telegram (dung lai logic CLI
+        telegram-test: kiem tra setup truoc, roi gui 1 tin).
+        """
+        from .__main__ import cmd_telegram_test
+
+        cfg = _load_cfg()
+        status = telegram.setup_status(cfg)
+        if not status.get("ready"):
+            missing = "; ".join(status.get("missing")
+                                or ["chua san sang"])
+            return {"ok": False,
+                    "reason": f"Telegram chua san sang — thieu: {missing}"}
+        rc = cmd_telegram_test(cfg)
+        if rc == 0:
+            return {"ok": True,
+                    "reason": "da gui tin nhan thu len Telegram"}
+        return {"ok": False,
+                "reason": "khong gui duoc tin thu — kiem tra token / "
+                          "chat_id va mang"}
+
     # Static assets cua build React (/assets/*) — mount SAU cac route
     # /api/* de API luon thang.
     assets_dir = static_path / "assets"
@@ -1134,7 +1317,8 @@ def main(argv=None):
         print("LOI: uvicorn chua cai — chay: pip install fastapi uvicorn")
         return 1
     print(f"DiamondX10 WebAPI: http://{args.host}:{args.port}/ "
-          "(chi local, khong co auth — dung mo cong ra ngoai)")
+          "(chi local, dang nhap bang ma OTP qua Telegram — "
+          "dung mo cong ra ngoai)")
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 

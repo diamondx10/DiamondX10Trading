@@ -10,7 +10,13 @@ thi ghi ro o duoi.
 2. Chay `quickstart.bat` (nhap doi) hoac `python quickstart.py`:
    quet terminal -> cai goi -> kiem tra demo -> dry-run -> chay bo
    kiem tra `test_run.py` (buoc 7).
-3. Chay vong live che do de xuat + trinh nghe Telegram (2 cua so):
+3. Mo web UI: nhap doi `start-webui.bat`, mo
+   http://127.0.0.1:8000, **dang nhap OTP** (bot Telegram gui ma
+   6 so, hieu luc 60 giay; xem `docs/web-ui.md` §9). Vao tab
+   **Quan ly** de bat live / listener / chay kiem tra — hoac dung
+   2 cua so terminal o buoc 4.
+4. Chay vong live che do de xuat + trinh nghe Telegram (2 cua so,
+   chi khi khong dung nut o tab Quan ly):
    ```
    python quickstart.py --live --recommend-only
    set PYTHONPATH=src

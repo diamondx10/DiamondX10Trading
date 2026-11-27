@@ -6,7 +6,7 @@
 // backend (Telegram/briefings) follows. On load, GET /api/language wins on
 // conflict. If the backend endpoints are not implemented yet, the UI keeps
 // the local choice and degrades gracefully (no crash).
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { apiGet, apiPost } from './api'
 
 export type Lang = 'vi' | 'en'
@@ -22,6 +22,73 @@ const VI = {
   'tab.backtest': 'Backtest',
   'tab.activity': 'Hoạt động',
   'tab.settings': 'Cài đặt',
+  'tab.manager': 'Quản lý',
+  // Header
+  'header.signOut': 'Đăng xuất',
+  // OTP login
+  'auth.title': 'Đăng nhập DiamondX10',
+  'auth.subtitle': 'Mã xác thực một lần (OTP) sẽ được gửi qua Telegram.',
+  'auth.sendOtp': 'Gửi mã OTP qua Telegram',
+  'auth.sending': 'Đang gửi mã...',
+  'auth.sent': 'Đã gửi mã OTP qua Telegram. Mã có hiệu lực trong 60 giây.',
+  'auth.codeLabel': 'Mã OTP (6 chữ số)',
+  'auth.codePlaceholder': '123456',
+  'auth.signIn': 'Đăng nhập',
+  'auth.verifying': 'Đang kiểm tra...',
+  'auth.resend': 'Gửi lại mã',
+  'auth.expiresIn': 'Mã hết hạn sau {n} giây',
+  'auth.cooldown': 'Vui lòng đợi {n} giây trước khi gửi lại mã.',
+  'auth.fallbackTerminal': 'Không gửi được qua Telegram. Hãy đọc mã OTP trên cửa sổ terminal của máy chủ.',
+  'auth.errorInvalid': 'Mã không đúng. Vui lòng thử lại.',
+  'auth.errorExpired': 'Mã đã hết hạn. Vui lòng gửi mã mới.',
+  'auth.errorTooMany': 'Nhập sai quá nhiều lần. Vui lòng gửi mã mới.',
+  'auth.errorNoOtp': 'Chưa có mã OTP. Vui lòng gửi mã trước.',
+  'auth.errorSendFailed': 'Không gửi được mã: {msg}',
+  'auth.errorGeneric': 'Đăng nhập thất bại: {msg}',
+  'auth.checking': 'Đang kiểm tra phiên đăng nhập...',
+  // Manager tab
+  'mgr.title': 'Quản lý hệ thống',
+  'mgr.subtitle': 'Theo dõi trạng thái và điều khiển Live, Listener và kiểm tra hệ thống.',
+  'mgr.mt5': 'MT5',
+  'mgr.live': 'Live',
+  'mgr.listener': 'Telegram listener',
+  'mgr.telegram': 'Telegram',
+  'mgr.killSwitch': 'Kill switch',
+  'mgr.equity': 'Equity quỹ',
+  'mgr.connected': 'Đã kết nối',
+  'mgr.notConnected': 'Chưa kết nối',
+  'mgr.configured': 'Đã cấu hình',
+  'mgr.notConfigured': 'Chưa cấu hình',
+  'mgr.running': 'Đang chạy',
+  'mgr.stopped': 'Đã dừng',
+  'mgr.on': 'ĐANG BẬT',
+  'mgr.off': 'Tắt',
+  'mgr.startLive': 'Bắt đầu Live (Recommend)',
+  'mgr.stopLive': 'Dừng Live',
+  'mgr.startListener': 'Bắt đầu Telegram listener',
+  'mgr.stopListener': 'Dừng Telegram listener',
+  'mgr.runDiagnostics': 'Chạy kiểm tra hệ thống',
+  'mgr.telegramTest': 'Gửi tin nhắn thử Telegram',
+  'mgr.killSwitchOn': 'Bật kill switch',
+  'mgr.killSwitchOff': 'Tắt kill switch',
+  'mgr.refresh': 'Làm mới trạng thái',
+  'mgr.controls': 'Điều khiển',
+  'mgr.modeRecommend': 'Chế độ: Recommend (chỉ khuyến nghị, không tự đặt lệnh)',
+  // Terminal log viewer
+  'log.title': 'Nhật ký terminal',
+  'log.process': 'Tiến trình',
+  'log.live': 'Live',
+  'log.listener': 'Telegram',
+  'log.diagnostics': 'Kiểm tra hệ thống',
+  'log.autoScroll': 'Tự cuộn xuống cuối',
+  'log.running': 'Đang chạy',
+  'log.stopped': 'Đã dừng',
+  'log.started': 'Bắt đầu',
+  'log.exitCode': 'Mã thoát',
+  'log.lines': 'dòng',
+  'log.empty': 'Chưa có dòng nhật ký nào',
+  'log.loadError': 'Không tải được nhật ký',
+  'log.notStarted': 'Chưa chạy',
   // Header / footer
   'header.themeLight': 'Chế độ sáng',
   'header.themeDark': 'Chế độ tối',
@@ -216,6 +283,69 @@ const EN: Record<I18nKey, string> = {
   'tab.backtest': 'Backtest',
   'tab.activity': 'Activity',
   'tab.settings': 'Settings',
+  'tab.manager': 'Manager',
+  'header.signOut': 'Sign out',
+  'auth.title': 'Sign in to DiamondX10',
+  'auth.subtitle': 'A one-time code (OTP) will be sent via Telegram.',
+  'auth.sendOtp': 'Send OTP code via Telegram',
+  'auth.sending': 'Sending code...',
+  'auth.sent': 'OTP code sent via Telegram. The code is valid for 60 seconds.',
+  'auth.codeLabel': 'OTP code (6 digits)',
+  'auth.codePlaceholder': '123456',
+  'auth.signIn': 'Sign in',
+  'auth.verifying': 'Verifying...',
+  'auth.resend': 'Resend code',
+  'auth.expiresIn': 'Code expires in {n} seconds',
+  'auth.cooldown': 'Please wait {n} seconds before requesting a new code.',
+  'auth.fallbackTerminal': 'Could not send via Telegram. Read the OTP code from the server terminal window.',
+  'auth.errorInvalid': 'Incorrect code. Please try again.',
+  'auth.errorExpired': 'Code expired. Please request a new code.',
+  'auth.errorTooMany': 'Too many wrong attempts. Please request a new code.',
+  'auth.errorNoOtp': 'No OTP requested yet. Please send a code first.',
+  'auth.errorSendFailed': 'Could not send the code: {msg}',
+  'auth.errorGeneric': 'Sign-in failed: {msg}',
+  'auth.checking': 'Checking your session...',
+  'mgr.title': 'System manager',
+  'mgr.subtitle': 'Monitor status and control Live, the listener and system checks.',
+  'mgr.mt5': 'MT5',
+  'mgr.live': 'Live',
+  'mgr.listener': 'Telegram listener',
+  'mgr.telegram': 'Telegram',
+  'mgr.killSwitch': 'Kill switch',
+  'mgr.equity': 'Fund equity',
+  'mgr.connected': 'Connected',
+  'mgr.notConnected': 'Not connected',
+  'mgr.configured': 'Configured',
+  'mgr.notConfigured': 'Not configured',
+  'mgr.running': 'Running',
+  'mgr.stopped': 'Stopped',
+  'mgr.on': 'ON',
+  'mgr.off': 'Off',
+  'mgr.startLive': 'Start Live (Recommend)',
+  'mgr.stopLive': 'Stop Live',
+  'mgr.startListener': 'Start Telegram listener',
+  'mgr.stopListener': 'Stop Telegram listener',
+  'mgr.runDiagnostics': 'Run system check',
+  'mgr.telegramTest': 'Send Telegram test message',
+  'mgr.killSwitchOn': 'Turn kill switch on',
+  'mgr.killSwitchOff': 'Turn kill switch off',
+  'mgr.refresh': 'Refresh status',
+  'mgr.controls': 'Controls',
+  'mgr.modeRecommend': 'Mode: Recommend (recommendations only, no automatic orders)',
+  'log.title': 'Terminal log',
+  'log.process': 'Process',
+  'log.live': 'Live',
+  'log.listener': 'Telegram',
+  'log.diagnostics': 'System check',
+  'log.autoScroll': 'Auto-scroll to bottom',
+  'log.running': 'Running',
+  'log.stopped': 'Stopped',
+  'log.started': 'Started',
+  'log.exitCode': 'Exit code',
+  'log.lines': 'lines',
+  'log.empty': 'No log lines yet',
+  'log.loadError': 'Could not load log',
+  'log.notStarted': 'Not started',
   'header.themeLight': 'Light mode',
   'header.themeDark': 'Dark mode',
   'header.themeLabel': 'Switch theme',
@@ -410,12 +540,16 @@ const Ctx = createContext<I18nCtx>({
   t: (key) => VI[key],
 })
 
-export function I18nProvider({ children }: { children: ReactNode }) {
+export function I18nProvider({ children, syncLanguage = true }: { children: ReactNode; syncLanguage?: boolean }) {
   const [lang, setLangState] = useState<Lang>(readStoredLanguage)
+  const syncRef = useRef(syncLanguage)
+  syncRef.current = syncLanguage
 
   // Backend wins on conflict: sync from GET /api/language on load.
-  // If the endpoint does not exist yet, keep the local choice.
+  // Gated on syncLanguage so that, before sign-in, the app calls ONLY
+  // GET /api/auth/status (every other /api/* route needs a session).
   useEffect(() => {
+    if (!syncLanguage) return
     let cancelled = false
     apiGet<{ language: string }>('/api/language')
       .then((r) => {
@@ -427,14 +561,15 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       })
       .catch(() => { /* endpoint not implemented yet — keep local choice */ })
     return () => { cancelled = true }
-  }, [])
+  }, [syncLanguage])
 
   const setLang = useCallback((l: Lang) => {
     setLangState(l)
     try { localStorage.setItem(LANG_KEY, l) } catch { /* ignore */ }
     // Persist server-side so Telegram/briefings follow; ignore failure
-    // (endpoint may not exist yet).
-    apiPost('/api/language', { language: l }).catch(() => { /* ignore */ })
+    // (endpoint may not exist yet). Skipped before sign-in: the call
+    // would 401 without a session.
+    if (syncRef.current) apiPost('/api/language', { language: l }).catch(() => { /* ignore */ })
   }, [])
 
   const t = useCallback((key: I18nKey, vars?: Record<string, string | number>) => {

@@ -76,6 +76,99 @@ async function handle<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>
 }
 
+// ---- OTP auth + manager console + terminal logs ----
+// Auth uses an httpOnly cookie ("dx10_session") set by the backend on a
+// successful verify; the browser sends it automatically afterwards. The OTP
+// itself is never present in any response and is never logged here.
+export interface AuthStatus { authenticated: boolean }
+export interface OtpRequestResult { sent: boolean; fallback?: string; reason?: string }
+export interface LiveState { running: boolean; mode: string | null; started: string | null }
+export interface ListenerState { running: boolean }
+export interface ActionResult { ok: boolean; reason: string }
+export type LogProcess = 'live' | 'listener' | 'diagnostics'
+export interface LogResponse { process: string; running: boolean; started_utc: string | null; exit_code: number | null; lines: string[]; total: number }
+
+export interface OtpFailure extends Error {
+  code?: string
+  retryAfter?: number
+}
+
+function otpError(message: string, code?: string, retryAfter?: number): OtpFailure {
+  const e = new Error(message) as OtpFailure
+  e.code = code
+  e.retryAfter = retryAfter
+  return e
+}
+
+export async function getAuthStatus(): Promise<AuthStatus> {
+  return apiGet<AuthStatus>('/api/auth/status')
+}
+
+export async function requestOtp(): Promise<OtpRequestResult> {
+  const res = await fetch('/api/auth/request-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
+  if (res.status === 429) {
+    const retryAfter = typeof body.retry_after === 'number' ? body.retry_after : 60
+    throw otpError(`HTTP 429`, 'cooldown', retryAfter)
+  }
+  if (!res.ok) {
+    throw otpError(typeof body.reason === 'string' ? body.reason : `HTTP ${res.status}`, 'send_failed')
+  }
+  return body as unknown as OtpRequestResult
+}
+
+export async function verifyOtp(code: string): Promise<void> {
+  const res = await fetch('/api/auth/verify-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
+    const reason = typeof body.reason === 'string' ? body.reason : `HTTP ${res.status}`
+    throw otpError(reason, reason)
+  }
+}
+
+export async function signOut(): Promise<void> {
+  await apiPost('/api/auth/sign-out')
+}
+
+export async function startLive(mode: 'recommend' | 'auto', desk = 'forex'): Promise<ActionResult> {
+  return apiPost<ActionResult>('/api/live/start', { mode, desk })
+}
+export async function stopLive(): Promise<ActionResult> {
+  return apiPost<ActionResult>('/api/live/stop')
+}
+export async function getLive(): Promise<LiveState> {
+  return apiGet<LiveState>('/api/live')
+}
+export async function startListener(): Promise<ActionResult> {
+  return apiPost<ActionResult>('/api/listener/start')
+}
+export async function stopListener(): Promise<ActionResult> {
+  return apiPost<ActionResult>('/api/listener/stop')
+}
+export async function getListener(): Promise<ListenerState> {
+  return apiGet<ListenerState>('/api/listener')
+}
+export async function runDiagnostics(): Promise<ActionResult> {
+  return apiPost<ActionResult>('/api/diagnostics')
+}
+export async function telegramTest(): Promise<ActionResult> {
+  return apiPost<ActionResult>('/api/telegram-test')
+}
+export async function toggleKillSwitch(on: boolean): Promise<unknown> {
+  return apiPost('/api/kill-switch', { on })
+}
+export async function fetchLogs(process: LogProcess, after: number): Promise<LogResponse> {
+  return apiGet<LogResponse>(`/api/logs?process=${process}&after=${after}`)
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(path)
   return handle<T>(res)

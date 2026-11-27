@@ -657,21 +657,43 @@
     KHONG dang bai va KHONG gui tom tat bai dang — 2 duong Telegram
     (khuyen nghi live, tom tat bai phan tich) tach biet, khong co
     double-send (xem `docs/live-loop.md` §4).
-54. **[ĐÃ CÓ — 2026-11-27] Feed bai dang la trang chu; bai dang la
-    goc nhin da xuat ban cua doi, moi nhat len dau; dedupe bai
-    tong hop** (`webui/src/components/Feed.tsx`,
-    `src/diamondx10/posts.py`, xem `docs/web-ui.md` §8): tab
-    Overview mo len la feed (composer o tren, danh sach bai duoi),
-    bai moi nhat len dau, loc duoc theo desk. Kho bai dang la
-    `decisions/analysis-posts.json` (file runtime, da gitignore;
-    thieu/hong thi doc nhu kho rong). Dedupe: bai tu tong hop
-    (`source: synthesis`, tu `synthesize --publish` /
-    `POST /api/publish`) co cung symbol + cung action + cung
-    `verdict_created_utc` voi bai moi nhat cua symbol do thi tra
-    lai bai cu, khong tao bai moi, khong gui Telegram lai. Bai
-    dang tay (`publish-post` / composer / `POST /api/posts`) luon
-    tao bai moi, khong dedupe. Feed khong co like / comment /
-    reaction / stories.
+55. **[ĐÃ CÓ — 2026-11-27] Dang nhap web UI bang OTP Telegram:
+    ma 6 so, hieu luc 60 giay, phien chi trong bo nho, tat server
+    la dang xuat** (`src/diamondx10/webauth.py`,
+    `src/diamondx10/webapi.py` `/api/auth/*`, xem `docs/web-ui.md`
+    §9): mo web UI gap man hinh dang nhap truoc; ma OTP 6 so
+    (`secrets`, co so 0 o dau) gui qua Telegram bot ve chat da cau
+    hinh, hieu luc 60 giay, dung 1 lan, nhap sai toi da 5 lan thi
+    ma bi huy, gui lai thi ma cu het hieu luc, gui qua nhanh thi
+    chan ~15 giay (429 + `retry_after`). Telegram chua cau hinh
+    hoac gui loi thi in ma ra stdout cua terminal chay server
+    (fallback "terminal") de giao dien khong bi khoa. Phien la
+    cookie httpOnly `dx10_session` (SameSite=Lax, Path=/,
+    Max-Age 30 ngay) + token luu trong dict bo nho server
+    (`secrets.token_urlsafe(32)`); khoi dong lai server thi het
+    phien — tat server/host la dang xuat; ngoai ra co nut Dang xuat
+    o header (huy phien server + xoa cookie). Moi `/api/*` (tru
+    `/api/auth/request-otp`, `/api/auth/verify-otp`,
+    `/api/auth/status`) doi cookie hop le, khong thi 401 JSON;
+    trang tinh van mo duoc de hien man hinh dang nhap. OTP va
+    token khong bao gio ghi file/log hay tra ve trong response.
+56. **[ĐÃ CÓ — 2026-11-27] Tab Quan ly tren web: nut bat dau
+    chay + xem log terminal truc tiep** (`webui/src/components/
+    Manager.tsx`, `LogViewer.tsx`, `src/diamondx10/procman.py`,
+    `src/diamondx10/webapi.py` `/api/logs`, `/api/diagnostics`,
+    `/api/telegram-test`, xem `docs/web-ui.md` §9): sau khi dang
+    nhap, tab Quan ly la trang chinh — the trang thai (MT5, Live,
+    Listener, Telegram, kill switch, von quy) + nut Bat/Tat Live
+    che do recommend, Bat/Tat Telegram listener, Chay kiem tra he
+    thong (`test_run.py` che do an toan, khong dat lenh), Gui tin
+    Telegram thu, bat/tat kill switch. Khung terminal trong tab
+    Quan ly hien log cua tien trinh duoc quan ly (live / listener
+    / diagnostics): stdout+stderr gom theo dong vao vong dem bo
+    nho (~500 dong / tien trinh, khong ghi file), poll
+    `GET /api/logs?process=...&after=...` moi ~2 giay, hien ~200
+    dong moi nhat + dong trang thai (dang chay / da dung, gio bat
+    dau, ma thoat). Khong co thanh tien do phan tich buoc o v1 —
+    dong log tho la nguon that.
 
 ## 8. Những điểm đang lệch giữa nghiên cứu và code
 

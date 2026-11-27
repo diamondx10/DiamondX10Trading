@@ -76,6 +76,11 @@ STRINGS = {
             "--no-wait` ở chế độ headed một lần rồi đăng nhập muse.ai "
             "trong cửa sổ trình duyệt.\n"
             "Vòng live vẫn dùng verdict trước đó trong lúc chờ."),
+        # --- WebUI: ma OTP dang nhap (gui qua Telegram) ---
+        "auth.otp_message": (
+            "💎 DiamondX10 — Mã đăng nhập của bạn: {code}\n"
+            "Mã có hiệu lực trong {seconds} giây. "
+            "Không chia sẻ mã này với bất kỳ ai."),
         # --- Briefing PTCB: template .md ---
         "briefing.title": "# BRIEFING PHAN TICH — DESK {desk}",
         "briefing.greeting": "Chao {analyst},",
@@ -181,6 +186,11 @@ STRINGS = {
             "`python -m diamondx10 muse-send --file <briefing.md> --no-wait` "
             "headed once and sign in to muse.ai in the browser window.\n"
             "The live loop keeps using the previous verdict meanwhile."),
+        # --- WebUI: OTP sign-in code (sent via Telegram) ---
+        "auth.otp_message": (
+            "💎 DiamondX10 — Your sign-in code: {code}\n"
+            "This code is valid for {seconds} seconds. "
+            "Never share this code with anyone."),
         # --- Briefing: .md template ---
         "briefing.title": "# ANALYSIS BRIEFING — DESK {desk}",
         "briefing.greeting": "Hello {analyst},",

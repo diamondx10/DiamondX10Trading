@@ -81,11 +81,21 @@ trinh duyet  ->  FastAPI (webapi.py, 127.0.0.1:8000)
 
 ## 4. Endpoint API
 
-Goc: `http://127.0.0.1:8000`. Tat ca tra JSON.
+Goc: `http://127.0.0.1:8000`. Tat ca tra JSON. Tru 3 route
+`/api/auth/request-otp`, `/api/auth/verify-otp`,
+`/api/auth/status`, moi `/api/*` khac doi cookie phien
+`dx10_session` hop le, khong thi tra 401 (xem muc 9).
 
 | Phuong thuc | Duong dan | Dung de lam gi |
 |---|---|---|
 | GET | `/api/status` | Trang thai quy: von, drawdown, kill switch, MT5, Telegram, live/listener co dang chay khong |
+| POST | `/api/auth/request-otp` | Gui ma OTP 6 so qua Telegram (hoac fallback terminal); tra `{"sent": true}` hoac `{"sent": false, "fallback": "terminal", ...}`; yeu cau qua nhanh → 429 `{"retry_after": N}` (xem muc 9) |
+| POST | `/api/auth/verify-otp` | Nhap ma OTP; dung thi set cookie `dx10_session` (httpOnly), sai → 401 `{"reason": ...}` (xem muc 9) |
+| POST | `/api/auth/sign-out` | Dang xuat (huy phien server + xoa cookie) |
+| GET | `/api/auth/status` | Da dang nhap chua (`{"authenticated": bool}`) |
+| GET | `/api/logs?process=&after=` | Log terminal cua tien trinh duoc quan ly (`live` / `listener` / `diagnostics`); tra `{"process","running","started_utc","exit_code","lines","total"}` (xem muc 9) |
+| POST | `/api/diagnostics` | Chay `test_run.py` che do an toan (khong dat lenh) nhu tien trinh "diagnostics" (xem muc 9) |
+| POST | `/api/telegram-test` | Gui 1 tin nhan thu qua Telegram bot; tra `{"ok","reason"}` |
 | GET | `/api/positions` | Vi the dang mo |
 | GET | `/api/signals?desk=` | Tin hieu TA moi nhat theo desk (`forex` / `xauusd` / `crypto` / `us_securities`) |
 | GET | `/api/synthesis?desk=` | Tong hop TA+PTCB theo desk (ma tran Yuling, quy tac 39) |
@@ -144,16 +154,20 @@ Khong lam duoc (va khong bao gio lam):
   o `data/muse-profile`); UI chi bam nut gui, khong hoi / khong luu
   mat khau Muse (xem `docs/muse-browser.md`).
 
-## 6. Bao mat — localhost-only, khong co auth
+## 6. Bao mat — localhost-only + dang nhap OTP (quy tac 55)
 
-- Server mac dinh chi bind `127.0.0.1` (localhost), **khong co
-  dang nhap**. Ai mo duoc port 8000 tren may do thi bam nut dat
-  lenh duoc nhu Phu — cung ranh gioi nhu dashboard chi doc
-  (`dashboard.py`).
+- Server mac dinh chi bind `127.0.0.1` (localhost). Ai mo duoc port
+  8000 tren may do thi van can dang nhap OTP moi dung duoc API —
+  moi `/api/*` (tru 3 route auth) doi cookie phien `dx10_session`
+  hop le, khong thi tra 401. Trang tinh (`/` va `/assets/*`) van
+  mo duoc de hien man hinh dang nhap.
 - **Khong mo port ra ngoai, khong bind `0.0.0.0`**, khong mo
   firewall cho port nay, khong chay tren may dung chung ma khong
   khoa man hinh. Can xem tu xa thi dung remote desktop vao may
   Windows do, khong phoi API ra internet.
+- OTP va token phien chi nam trong bo nho server, khong ghi file,
+  khong ghi log, khong tra ve trong response API. Tat server la
+  mat het phien (xem muc 9).
 - Khong co token, mat khau hay du lieu phien dang nhap trong doc
   nay hay trong code frontend — token Telegram va mat khau MT5 van
   chi qua bien moi truong luc chay nhu cu.
@@ -315,11 +329,55 @@ MIT**). Chi lay y tuong bo cuc; **khong copy code, khong them
 dependency** — feed dx10 viet bang React + token thiet ke Apple-style
 san co cua dx10, khong dung Next.js/Tailwind cua Kinfolk.
 
+## 9. Dang nhap OTP + tab Quan ly + xem log terminal (quy tac 55–56)
+
+**Dang nhap (quy tac 55).** Mo web UI len thi gap man hinh dang
+nhap truoc, khong vao thang giao dien. Bam "Gui ma OTP qua
+Telegram" — bot gui 1 ma 6 so ve chat Telegram da cau hinh
+(`telegram.chat_id`). Ma chi song **60 giay**, dung **1 lan**;
+nhap sai toi da **5 lan** thi ma bi huy. Gui ma qua nhanh thi bi
+chan ~15 giay (429 + `retry_after`). Neu Telegram chua cau hinh
+hoac gui loi: server **in ma ra cua so terminal dang chay server**
+(de doc truc tiep) va man hinh dang nhap bao user doc ma o
+terminal — giao dien khong bao gio bi khoa vi thieu Telegram.
+Ma OTP va token phien **chi nam trong bo nho server** (khong ghi
+file, khong ghi log, khong tra ve trong response API); phien la
+cookie httpOnly `dx10_session`. **Tat server/host la dang xuat**
+(khoi dong lai server thi het phien, phai dang nhap lai) — ngoai
+ra co nut **Dang xuat** o header luc nao cung thay. Nut chon
+ngon ngu VI | EN van hien tren man hinh dang nhap va o header.
+Moi `/api/*` (tru 3 route auth) doi cookie phien hop le, khong
+thi tra 401 JSON, khong traceback.
+
+**Tab Quan ly (quy tac 56).** Sau khi dang nhap, tab **Quan ly**
+la trang chinh: the trang thai (MT5, Live, Listener, Telegram,
+kill switch, von quy) + cac nut bat dau chay: **Bat/Tat Live**
+che do recommend (`POST /api/live/start {"mode":"recommend"}` —
+mac dinh recommend, lenh chi dat qua nut Telegram), **Bat/Tat
+Telegram listener**, **Chay kiem tra he thong** (`POST
+/api/diagnostics` — chay `test_run.py` che do an toan, khong dat
+lenh), **Gui tin Telegram thu** (`POST /api/telegram-test`),
+**bat/tat kill switch**. Moi nut hien lai ly do (`reason`) tra ve
+tu backend.
+
+**Xem log terminal (quy tac 56).** Trong tab Quan ly co khung
+terminal: chon tien trinh (Live / Telegram / Kiem tra he thong),
+poll `GET /api/logs?process=...&after=...` moi ~2 giay, hien ~200
+dong moi nhat (nen toi, chu monospace, tu cuon xuong co nut tam
+dung). Tren khung co dong trang thai: dang chay / da dung, gio
+bat dau, ma thoat — de biet dang chay o buoc nao, ket qua ra sao
+(`test_run.py` in buoc `[n/8]`; vong live in tung vong). Log chi
+luu trong bo nho server (vong dem ~500 dong / tien trinh, khong
+ghi file); chi gom log cua tien trinh duoc quan ly (live,
+listener, diagnostics) — dong khoi dong cua chinh server webapi
+van chi o cua so console.
+
 ## Tai lieu lien quan
 
 - `docs/trading-principles.md` quy tac 47–48 (web UI, UI dung
   lai kiem tra cua backend), quy tac 51–52 (song ngu + tin doi),
-  quy tac 53–54 (feed bai dang phan tich + dedupe + Telegram).
+  quy tac 53–54 (feed bai dang phan tich + dedupe + Telegram),
+  quy tac 55–56 (dang nhap OTP + tab Quan ly + log terminal).
 - `docs/dx10-flow.md` — flow van hanh 24/7 (live + listener).
 - `docs/live-loop.md` §6 — che do khuyen nghi + nut dat lenh.
 - `docs/muse-browser.md` — gui briefing cho Muse qua trinh duyet.
