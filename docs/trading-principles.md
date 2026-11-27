@@ -889,6 +889,40 @@
     tren thi truong that; can walk-forward theo tung symbol (co loc /
     khong loc, OOS) truoc khi tin, neu khong cai thien expectancy thi
     tat loc.
+65. **[ĐÃ CÓ — 2026-11-28] Mo hinh AI outcome offline — chinh tham
+    so TA tu log, khong tao tin hieu** (`src/diamondx10/ai/`,
+    `src/diamondx10/ai/live_hook.py`, lenh `ai-setup` / `ai-train` /
+    `ai-tune`, xem `docs/ai-ta-model.md`): mo hinh GRU PyTorch thuan
+    (2 lop, hidden 64, dropout 0.2, head 3 logits) hoc P(ket qua lenh
+    | context thi truong, tham so TA) — dau ra P(tp_first) /
+    P(sl_first) / P(timeout), KHONG co head du doan huong rieng;
+    input 48 cot = 35 feature context (v1) + 13 tham so TA, cua so
+    32 bar M15; nhan TP/SL-first tren 20 bar M15 sau diem vao. Vong
+    chinh: `ai-tune` lay mau counterfactual (bien doi mot tham so mot
+    luc) -> xep hang ung vien theo win rate du doan -> kiem dinh OOS
+    walk-forward that -> de xuat ghi ra YAML dang
+    strategy.per_symbol / soft_rules bang ham write_proposals cua
+    ta-review; de xuat chi ap bang `ta-review --apply <file>` (go chu
+    APPLY) — KHONG BAO GIO tu ap. File mo hinh moi chi thay file live
+    khi win rate OOS thang ca baseline quy tac va mo hinh live hien
+    co. Tich hop live: du doan chi la BOI CANH mac dinh
+    (`ai_win_prob` / `ai_probs` / `ai_model_version` gan vao tin
+    hieu + outcome log); chan lenh theo AI chi khi Phu bat tay
+    `ai.block_on_low_win_prob: true` trong config (mac dinh false,
+    nguong `ai.min_win_prob` mac dinh 0.30) — chan dat SAU moi gate
+    cung, truoc khi dat lenh, thanh BLOCKED-AI-LOW-WIN-PROB. AI
+    khong bao gio vuot gate cung, dat lenh, doi size/risk, hay ghi
+    de ma tran TA+FA (muc 39-40, 61-63). Thieu / het han (qua
+    `ai.max_age_days`, mac dinh 90 ngay) / hong mo hinh, chua cai
+    torch, khong du bar (can 81 bar M15) thi live chay tiep khong
+    co AI, chi canh bao 1 lan, khong bao gio crash. Train la tac vu
+    offline theo lich (de xuat hang tuan, Chu nhat 22:00 ICT),
+    KHONG phai theo tung nen; mo hinh live chi doc file .pt da
+    train. **Honest limit:** mang neural khong dam bao khuyen nghi
+    tot hon — OOS la bang chung duy nhat; mau nho thi overfit
+    (chua du mau thi khong de xuat); AI chinh mo hinh TA tu du lieu
+    log, khong thay the mo hinh TA hay cac gate cung. Chua kiem
+    chung tren thi truong that (can may Windows co MT5 demo).
 
 ## 8. Những điểm đang lệch giữa nghiên cứu và code
 
@@ -974,6 +1008,16 @@
   bo lo dao chieu dung — can walk-forward theo tung symbol (co loc
   / khong loc, OOS) truoc khi tin; neu khong cai thien expectancy
   thi tat loc.
+- [x] Mo hinh AI outcome offline — xong 2026-11-28: GRU hoc
+  P(ket qua lenh | context, tham so TA) de chinh tham so TA tu log;
+  `ai-tune` xep hang ung vien + kiem dinh OOS walk-forward that +
+  de xuat qua duong ta-review, khong bao gio tu ap; gate promotion
+  file mo hinh (thang ca baseline quy tac va mo hinh live); tich
+  hop live chi la boi canh mac dinh (`ai_win_prob` / `ai_probs` /
+  `ai_model_version` trong tin hieu + outcome log), chan opt-in
+  `ai.block_on_low_win_prob` (mac dinh TAT) dat sau moi gate cung
+  (mục 65); xem `docs/ai-ta-model.md`. Chua kiem chung tren may
+  Windows co MT5 demo (train that + du doan that + lenh demo that).
 - [ ] Theo dõi: hạ rủi ro desk vàng xuống 2–3% — chỉ quyết sau khi có số ATR thật từ MT5 demo (mục 8).
 - [ ] **Giới hạn rủi ro toàn quỹ — các con số mặc định Phase F (mục 33): lỗ trong ngày 3% vốn quỹ, tối đa 10 vị thế mở toàn quỹ, tối đa 2 vị thế mở/desk — cần Phu duyệt (giữ nguyên, tăng hay giảm).**
 - [ ] Donchian breakout có dùng cho đường live không — cần Phu duyệt + bằng chứng walk-forward (mục 23).
@@ -998,6 +1042,7 @@
 - `docs/per-symbol-ta.md` — bảng tham số TA riêng theo symbol, mô hình quy tắc cứng/mềm, schema `soft_rules` + ví dụ (mục 61–62).
 - `docs/ta-learning-loop.md` — vòng học TA: ghi log khuyen nghi, cham diem bang nen M15 that, bao cao bai hoc + de xuat tinh chinh, kiem dinh OOS truoc khi ap tay (mục 63).
 - `docs/multi-timeframe-ta.md` — phân tích kỹ thuật đa khung thời gian: xu hướng H1 + entry M15, bảng cho phép/chặn, suy giảm khi thiếu dữ liệu H1, bối cảnh htf trong outcome log (mục 64).
+- `docs/ai-ta-model.md` — mô hình AI outcome offline: GRU học P(kết quả lệnh | context, tham số TA) để chỉnh tham số TA từ log, vòng tune + kiểm định OOS, tích hợp live chỉ là bối cảnh (mặc định) + chặn opt-in, giới hạn trung thực (mục 65).
 - `docs/market-news.md` — nguồn tin thị trường theo desk, phân tầng độ tin cậy.
 - `docs/analysis-workflow.md` — quy trình phân tích PTKT + PTCB + tổng hợp Yuling (mục 37–40).
 - `docs/muse-browser.md` — gửi briefing cho Muse bằng trình duyệt tự động, chờ verdict, chu kỳ tự động `muse-auto` (mục 45–46, 49).

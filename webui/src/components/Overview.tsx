@@ -1,8 +1,75 @@
 import { useState } from 'react'
-import { apiGet, apiPost, fmtPct, fmtUsd, type Status } from '../api'
+import { apiGet, apiPost, fetchPortfolioRisk, fmtPct, fmtUsd, type Status } from '../api'
 import { useI18n } from '../i18n'
 import { Empty, Err, Loading, StatusDot, useFetch } from './shared'
 import AnalysisFeed from './Feed'
+
+function PortfolioRiskSection() {
+  const { t } = useI18n()
+  const { data, loading, error, reload } = useFetch(fetchPortfolioRisk)
+
+  if (loading) return <div className="card"><h2>{t('portrisk.title')}</h2><Loading /></div>
+  if (error || !data) return <div className="card"><h2>{t('portrisk.title')}</h2><Err message={error ?? t('common.empty')} onRetry={reload} /></div>
+  const r = data
+  if (!r.has_positions) {
+    return (
+      <div className="card">
+        <h2>{t('portrisk.title')}</h2>
+        <Empty text={t('portrisk.empty')} />
+        <p className="muted small" style={{ textAlign: 'center' }}>{t('portrisk.emptyHint')}</p>
+      </div>
+    )
+  }
+  const worst = r.stress.length > 0 ? [...r.stress].sort((a, b) => a.pnl_usd - b.pnl_usd)[0] : null
+  const totalCompVar = r.component_var.reduce((a, c) => a + (c.var_usd || 0), 0)
+
+  return (
+    <div className="card">
+      <h2>{t('portrisk.title')}</h2>
+      <div className="grid">
+        <div><div className="stat-label">{t('portrisk.varParametric')}</div><div className="stat-value">{fmtUsd(r.var.parametric_95)}</div><div className="stat-sub">CVaR 95%: {fmtUsd(r.var.parametric_cvar_95)}</div></div>
+        <div><div className="stat-label">{t('portrisk.varMc')}</div><div className="stat-value">{fmtUsd(r.var.mc_95)}</div><div className="stat-sub">CVaR 95%: {fmtUsd(r.var.mc_cvar_95)}</div></div>
+        <div>
+          <div className="stat-label">{t('portrisk.limit')}</div>
+          <div className="stat-value">{fmtUsd(r.var.limit_usd)}</div>
+          <div className="stat-sub" style={r.var.breached ? { color: 'var(--red)', fontWeight: 600 } : undefined}>
+            {r.var.breached ? t('portrisk.breached') : t('portrisk.withinLimit')} ({fmtPct(r.var.limit_pct)})
+          </div>
+        </div>
+        <div>
+          <div className="stat-label">{t('portrisk.worstStress')}</div>
+          {worst ? (
+            <>
+              <div className="stat-value" style={{ fontSize: 20 }}>{worst.name}</div>
+              <div className={`stat-sub ${worst.pnl_usd < 0 ? 'neg' : ''}`}>{fmtUsd(worst.pnl_usd)} ({fmtPct(worst.pnl_pct)})</div>
+            </>
+          ) : <div className="stat-sub">—</div>}
+        </div>
+      </div>
+      <p className="muted small">{t('portrisk.mcPaths', { paths: r.mc.paths, days: r.mc.horizon_days })}</p>
+      {r.concentration.largest_symbol && (
+        <p className="muted small">{t('portrisk.largest', { symbol: r.concentration.largest_symbol, pct: r.concentration.largest_share_pct.toFixed(1) })}</p>
+      )}
+      <h3 style={{ marginTop: 16 }}>{t('portrisk.componentVar')}</h3>
+      {r.component_var.length === 0 ? <Empty /> : (
+        <div>
+          {r.component_var.map((c) => (
+            <div key={c.symbol} style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <span><strong>{c.symbol}</strong> <span className="muted small">{c.desk}</span></span>
+                <span>{fmtUsd(c.var_usd)} · {fmtPct(c.share_pct)}</span>
+              </div>
+              <div className="gauge"><div style={{ width: `${Math.min(100, Math.max(0, totalCompVar > 0 ? (c.var_usd / totalCompVar) * 100 : c.share_pct))}%` }} /></div>
+            </div>
+          ))}
+        </div>
+      )}
+      {r.warnings.length > 0 && (
+        <p className="muted small" style={{ marginTop: 12 }}>{t('portrisk.warnings')}: {r.warnings.join('; ')}</p>
+      )}
+    </div>
+  )
+}
 
 export default function Overview() {
   const { t } = useI18n()
@@ -47,6 +114,8 @@ export default function Overview() {
       </div>
 
       <AnalysisFeed />
+
+      <PortfolioRiskSection />
 
       <div className="card">
         <h2>{t('ov.killSwitch')}</h2>

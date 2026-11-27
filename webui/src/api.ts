@@ -2,6 +2,30 @@
 export interface DeskStatus { desk: string; equity: number | null; open_positions: number }
 export interface Status { equity: number | null; capital: number; drawdown_pct: number | null; kill_switch_on: boolean; mt5_ok: boolean; telegram_ready: boolean; live_running: boolean; listener_running: boolean; desks: DeskStatus[] }
 export interface Position { desk: string; symbol: string; direction: string; entry: number; sl: number | null; tp: number | null; volume: number; unrealised_pnl: number | null; opened: string }
+// Portfolio risk report (GET /api/portfolio-risk): same numbers as the
+// `portfolio-risk` CLI. Read-only; no order placement.
+export interface PortfolioExposure { symbol: string; desk: string; direction: string; volume: number; price: number | null; notional_usd: number; signed_notional_usd: number }
+export interface PortfolioVaR { parametric_95: number; parametric_cvar_95: number; historical_95: number; historical_cvar_95: number; mc_95: number; mc_cvar_95: number; limit_usd: number; limit_pct: number; breached: boolean }
+export interface PortfolioMc { paths: number; seed: number | null; horizon_days: number; mean_pnl: number; sd_pnl: number; p5: number; p50: number; p95: number; prob_breach_drawdown_pct: number }
+export interface ComponentVaR { symbol: string; desk: string; var_usd: number; share_pct: number }
+export interface StressCase { name: string; pnl_usd: number; pnl_pct: number; breaches_drawdown: boolean }
+export interface PortfolioRiskReport {
+  has_positions: boolean
+  demo: boolean
+  equity_usd: number
+  symbols: string[]
+  exposures: PortfolioExposure[]
+  var: PortfolioVaR
+  mc: PortfolioMc
+  component_var: ComponentVaR[]
+  concentration: { largest_symbol: string | null; largest_share_pct: number }
+  stress: StressCase[]
+  warnings: string[]
+  notes: string[]
+}
+export async function fetchPortfolioRisk(): Promise<PortfolioRiskReport> {
+  return apiGet<PortfolioRiskReport>('/api/portfolio-risk')
+}
 export interface Signal { symbol: string; action: string; rsi: number | null; atr: number | null; patterns: string[]; regime: string | null }
 export interface SynthesisItem { symbol: string; ta_action: string; fa_direction: string | null; fa_confidence: number | null; recommendation: string; size_factor: number | null; verdict_age_hours: number | null; rationale: string }
 export interface PendingOrder { id: string; desk: string; manager: string; symbol: string; action: string; entry: number; sl: number | null; tp: number | null; volume: number; risk_usd: number | null; status: string; created_utc: string; expires_utc: string; ticket: number | null }

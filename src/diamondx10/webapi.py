@@ -803,6 +803,57 @@ def _muse_send_worker(job_id, path, cfg):
         _set_job(job_id, "error", None, f"loi khong ro: {exc}")
 
 
+# --- Bao cao rui ro danh muc (GET /api/portfolio-risk) ---
+
+def _empty_portfolio_risk_report(cfg):
+    """Payload rong cua GET /api/portfolio-risk: cung shape nhu
+    portfolio_risk.build_portfolio_risk_report nhung has_positions
+    False, VaR 0.0 — dung khi chua co vi the / lich su, hoac khi
+    module portfolio_risk chua co / loi (khong bao gio 500)."""
+    try:
+        fund = _fund_status(cfg)
+        equity = fund.get("equity")
+    except Exception:  # noqa: BLE001 — state hong thi dung von
+        equity = None
+    if equity is None:
+        try:
+            equity = float((cfg.get("fund") or {})
+                           .get("total_capital_usd") or 0)
+        except (TypeError, ValueError):
+            equity = 0.0
+    try:
+        limit_pct = float(((cfg or {}).get("risk") or {})
+                          .get("max_drawdown_pct") or 10.0)
+    except (TypeError, ValueError):
+        limit_pct = 10.0
+    try:
+        demo = bool(((cfg or {}).get("trading") or {})
+                    .get("demo_only", True))
+    except Exception:  # noqa: BLE001 — doc demo loi thi mac dinh True
+        demo = True
+    return {
+        "has_positions": False,
+        "demo": demo,
+        "equity_usd": float(equity),
+        "symbols": [],
+        "exposures": [],
+        "var": {"parametric_95": 0.0, "parametric_cvar_95": 0.0,
+                "historical_95": 0.0, "historical_cvar_95": 0.0,
+                "mc_95": 0.0, "mc_cvar_95": 0.0,
+                "limit_usd": round(float(equity) * limit_pct / 100.0, 2),
+                "limit_pct": limit_pct, "breached": False},
+        "mc": {"paths": 0, "seed": None, "horizon_days": 1,
+               "mean_pnl": 0.0, "sd_pnl": 0.0, "p5": 0.0, "p50": 0.0,
+               "p95": 0.0, "prob_breach_drawdown_pct": 0.0},
+        "component_var": [],
+        "concentration": {"largest_symbol": None,
+                          "largest_share_pct": 0.0},
+        "stress": [],
+        "warnings": ["chua co vi the mo — chua tinh duoc VaR"],
+        "notes": [],
+    }
+
+
 # --- App ---
 
 def create_app(static_dir=None):
@@ -990,6 +1041,26 @@ def create_app(static_dir=None):
              "latest_price": r.get("latest_price"),
              "unrealized_pnl": r.get("unrealized_pnl")}
             for r in rows]}
+
+    @app.get("/api/portfolio-risk")
+    def api_portfolio_risk():
+        """Bao cao rui ro danh muc (cung so voi CLI portfolio-risk).
+
+        Goi portfolio_risk.build_portfolio_risk_report(cfg); module
+        chua co / loi / thieu vi the-lich su thi tra 200 voi payload
+        rong (has_positions False, VaR 0.0) — khong bao gio 500.
+        """
+        cfg = _load_cfg()
+        try:
+            from .portfolio_risk import build_portfolio_risk_report
+            report = build_portfolio_risk_report(cfg)
+            if isinstance(report, dict) and "has_positions" in report:
+                return report
+            print("LOI webapi portfolio-risk: bao cao thieu khoa "
+                  "has_positions")
+        except Exception as exc:  # noqa: BLE001 — module chua co / loi
+            print(f"LOI webapi portfolio-risk: {exc}")
+        return _empty_portfolio_risk_report(cfg)
 
     # --- Tin hieu / tong hop ---
 

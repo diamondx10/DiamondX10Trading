@@ -323,6 +323,41 @@ def build_record(result, sig, cfg, desk, symbol):
     atr = _to_float(levels.get("atr"))
     if atr is None:
         atr = _to_float(_pick(sig, ctx, key="atr"))
+    context = {
+        "rsi": _to_float(_pick(sig, ctx, key="rsi")),
+        "sma_fast": sma_fast,
+        "sma_slow": sma_slow,
+        "sma_relation": sma_relation,
+        "atr": atr,
+        "atr_sl_mult": _to_float(resolved.get("atr_sl_mult")),
+        "regime": regime_name,
+        "adx": regime_adx if regime_adx is not None else _to_float(
+            _pick(sig, ctx, key="adx")),
+        "patterns": _pattern_names(sig.get("patterns")),
+        "pattern_score": _to_float(sig.get("pattern_score")),
+        "strategy_name": _to_str(_pick(
+            sig, key="strategy") or _pick(sig, key="strategy_name")
+            or "default"),
+        "resolved_params": resolved,
+        "soft_rules": _soft_rules_from(result, sig),
+        "fa": _fa_from(result, sig),
+        "htf": _htf_from(sig, result.get("action") or sig.get("action")),
+    }
+    # Du doan AI outcome (muc 65): chi ghi khi tin hieu / ket qua
+    # mang theo — ban ghi khong co AI giu nguyen nhu cu (khong them
+    # khoa None). ai_probs phai la list 3 so moi ghi.
+    ai_win_prob = _to_float(_pick(result, sig, key="ai_win_prob"))
+    if ai_win_prob is not None:
+        context["ai_win_prob"] = ai_win_prob
+    ai_probs = _pick(result, sig, key="ai_probs")
+    if isinstance(ai_probs, (list, tuple)) and len(ai_probs) == 3:
+        ai_probs = [_to_float(v) for v in ai_probs]
+        if all(v is not None for v in ai_probs):
+            context["ai_probs"] = ai_probs
+    ai_model_version = _to_str(_pick(result, sig,
+                                     key="ai_model_version"))
+    if ai_model_version:
+        context["ai_model_version"] = ai_model_version
     return {
         "id": secrets.token_hex(4),
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -340,26 +375,7 @@ def build_record(result, sig, cfg, desk, symbol):
         "size_scale": _to_float(result.get("size_scale",
                                            levels.get("size_scale"))) or 1.0,
         "pending_id": result.get("pending_id"),
-        "context": {
-            "rsi": _to_float(_pick(sig, ctx, key="rsi")),
-            "sma_fast": sma_fast,
-            "sma_slow": sma_slow,
-            "sma_relation": sma_relation,
-            "atr": atr,
-            "atr_sl_mult": _to_float(resolved.get("atr_sl_mult")),
-            "regime": regime_name,
-            "adx": regime_adx if regime_adx is not None else _to_float(
-                _pick(sig, ctx, key="adx")),
-            "patterns": _pattern_names(sig.get("patterns")),
-            "pattern_score": _to_float(sig.get("pattern_score")),
-            "strategy_name": _to_str(_pick(
-                sig, key="strategy") or _pick(sig, key="strategy_name")
-                or "default"),
-            "resolved_params": resolved,
-            "soft_rules": _soft_rules_from(result, sig),
-            "fa": _fa_from(result, sig),
-            "htf": _htf_from(sig, result.get("action") or sig.get("action")),
-        },
+        "context": context,
         "params_hash": _params_hash(resolved),
     }
 

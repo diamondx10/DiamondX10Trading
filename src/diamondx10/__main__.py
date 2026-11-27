@@ -2,7 +2,7 @@
 | sweep | import-bars | mt5-dry-run | mt5-trade | mt5-symbols
 | backfill | export-bars | live | telegram-listen | telegram-test
 | briefing | verdict | synthesize | publish-post | muse-setup | muse-send | muse-auto
-| evaluate-signals | live | ai-setup | ai-train | ai-tune.
+| evaluate-signals | live | ai-setup | ai-train | ai-tune | portfolio-risk.
 
 Lenh mt5-* va live CHI dung voi tai khoan DEMO (Exness demo + MT5 terminal).
 Xem docs/mt5-demo.md va docs/live-loop.md truoc khi chay.
@@ -112,6 +112,140 @@ def cmd_telegram_test(cfg):
     print("LOI: khong gui duoc tin thu (xem CANH BAO Telegram o tren) — "
           "kiem tra token/chat_id va mang.")
     return 1
+
+
+def _pr_float(value, default=0.0):
+    """float(value) an toan cho bao cao rui ro danh muc (None / chuoi
+    loi thi ve default — bao cao khong bao gio crash vi 1 con so)."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def format_portfolio_risk_alert(rep):
+    """Tin canh bao Telegram khi rui ro danh muc vuot gioi han (v1:
+    chi bao cao — KHONG chan lenh).
+
+    Tieng Viet khong dau, gom: VaR 95% (3 cach tinh) so voi gioi han,
+    stress te nhat + P&L cua no, component VaR lon nhat. Chi goi khi
+    da xac dinh co vuot gioi han (cmd_portfolio_risk kiem tra truoc).
+    """
+    var = rep.get("var") or {}
+    stress = rep.get("stress") or []
+    comp = rep.get("component_var") or []
+    worst = (min(stress, key=lambda s: _pr_float(s.get("pnl_usd")))
+             if stress else None)
+    top = (max(comp, key=lambda c: _pr_float(c.get("var_usd")))
+           if comp else None)
+    lines = ["CANH BAO RUI RO DANH MUC DiamondX10"]
+    lines.append(
+        f"VaR 95%: parametric {_pr_float(var.get('parametric_95')):.2f} "
+        f"USD | lich su {_pr_float(var.get('historical_95')):.2f} USD | "
+        f"Monte Carlo {_pr_float(var.get('mc_95')):.2f} USD")
+    lines.append(
+        f"Gioi han VaR: {_pr_float(var.get('limit_usd')):.2f} USD "
+        f"({_pr_float(var.get('limit_pct')):g}% von quy)"
+        + (" — VUOT GIOI HAN" if var.get("breached") else ""))
+    if worst is not None:
+        lines.append(
+            f"Stress te nhat: {worst.get('name')} — "
+            f"P&L {_pr_float(worst.get('pnl_usd')):+.2f} USD "
+            f"({_pr_float(worst.get('pnl_pct')):+.2f}%)"
+            + (" — VUOT DRAWDOWN" if worst.get("breaches_drawdown")
+               else ""))
+    if top is not None:
+        lines.append(
+            f"Component VaR lon nhat: {top.get('symbol')} "
+            f"({top.get('desk')}) {_pr_float(top.get('var_usd')):.2f} "
+            f"USD ({_pr_float(top.get('share_pct')):.1f}%)")
+    lines.append(
+        f"Equity: {_pr_float(rep.get('equity_usd')):.2f} USD | "
+        f"Vi the mo: {len(rep.get('exposures') or [])}")
+    return "\n".join(lines)
+
+
+def cmd_portfolio_risk(cfg, mc_paths=None, horizon_days=None, demo=False,
+                       alert=False, *, store=None):
+    """Lenh CLI `portfolio-risk`: bao cao VaR / Monte Carlo / stress
+    cua danh muc dang mo (v1: CHI BAO CAO + canh bao — khong chan lenh,
+    khong dat lenh).
+
+    Tra 0 tru khi loi cau hinh (tra 1, khong traceback). Khong co vi
+    the mo (va khong --demo) thi in trang thai rong, tra 0. Thieu kho
+    lich su / vi the thi ha cap ve trang thai rong, khong traceback.
+    --alert chi gui 1 tin Telegram khi vuot gioi han (var.breached
+    hoac stress vuot drawdown); gui loi thi chi in canh bao, khong
+    crash lenh. store: diem tiem kho lich su cho test (mac dinh mo
+    theo config).
+    """
+    try:
+        from .portfolio_risk import (
+            build_portfolio_risk_report,
+            format_portfolio_risk_report,
+            validate_portfolio_risk_config,
+        )
+    except ImportError as exc:
+        print(f"LOI: chua co module portfolio_risk ({exc}) — doi worker "
+              "portfolio-risk hoan thanh roi chay lai.")
+        return 1
+    if mc_paths is not None and int(mc_paths) <= 0:
+        print(f"LOI: --mc phai > 0 (nhan {mc_paths!r})")
+        return 1
+    if horizon_days is not None and int(horizon_days) <= 0:
+        print(f"LOI: --horizon-days phai > 0 (nhan {horizon_days!r})")
+        return 1
+    try:
+        validate_portfolio_risk_config(cfg)
+    except ValueError as exc:
+        print(f"LOI cau hinh portfolio-risk: {exc}")
+        return 1
+    own_store = store is None
+    if own_store:
+        try:
+            store = _history_store(cfg)
+        except Exception as exc:  # noqa: BLE001 — khong co kho thi bao cao rong
+            print(f"Canh bao: khong mo duoc kho lich su ({exc}) — bao "
+                  "cao rui ro se khong co du lieu lich su.")
+            store = None
+    try:
+        rep = build_portfolio_risk_report(
+            cfg, mc_paths=mc_paths, horizon_days=horizon_days,
+            demo=demo, store=store)
+    except ValueError as exc:
+        print(f"LOI: {exc}")
+        return 1
+    except Exception as exc:  # noqa: BLE001 — lenh CLI khong traceback
+        print(f"LOI: khong tinh duoc rui ro danh muc ({exc})")
+        return 0
+    finally:
+        if own_store and store is not None:
+            close = getattr(store, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001 — dong kho loi thi thoi
+                    pass
+    print(format_portfolio_risk_report(rep))
+    if alert:
+        var = rep.get("var") or {}
+        stress = rep.get("stress") or []
+        breached = bool(var.get("breached")) or any(
+            s.get("breaches_drawdown") for s in stress)
+        if breached:
+            try:
+                ok = telegram_mod.send_message(
+                    format_portfolio_risk_alert(rep), cfg=cfg)
+            except Exception as exc:  # noqa: BLE001 — canh bao khong bao gio crash lenh
+                print(f"CANH BAO: khong gui duoc canh bao Telegram "
+                      f"({exc}).")
+                return 0
+            if ok:
+                print("Da gui canh bao rui ro danh muc qua Telegram.")
+            else:
+                print("CANH BAO: khong gui duoc canh bao rui ro danh "
+                      "muc qua Telegram (xem CANH BAO Telegram o tren).")
+    return 0
 
 
 def cmd_evaluate_signals(cfg, outcomes=None, evaluated=None, window=None,
@@ -984,6 +1118,22 @@ def main(argv=None):
     rep.add_argument("--save", default=None, metavar="PATH",
                      help="ghi bao cao ra file thay vi in stdout; tao thu "
                           "muc cha neu can (xem docs/fund-risk-ops.md)")
+    pr = sub.add_parser("portfolio-risk",
+                        help="bao cao rui ro danh muc: VaR, Monte Carlo, "
+                             "stress test (chi bao cao + canh bao, khong "
+                             "chan lenh, khong dat lenh)")
+    pr.add_argument("--mc", type=int, default=None,
+                    help="so duong Monte Carlo (mac dinh: risk.mc_paths "
+                         "trong config)")
+    pr.add_argument("--horizon-days", type=int, default=None,
+                    help="so ngay du bao cho Monte Carlo (mac dinh: "
+                         "risk.mc_horizon_days trong config)")
+    pr.add_argument("--demo", action="store_true",
+                    help="dung vi the demo de xem thu bao cao (khi chua "
+                         "co vi the mo that)")
+    pr.add_argument("--alert", action="store_true",
+                    help="gui 1 tin canh bao Telegram CHI khi vuot gioi "
+                         "han (VaR hoac stress vuot drawdown)")
     k = sub.add_parser("kill-switch",
                        help="nut dung khan cap: on (bat) | off (tat) | "
                             "status (xem trang thai) — xem docs/fund-risk-ops.md")
@@ -1394,6 +1544,10 @@ def main(argv=None):
             print(f"Da ghi bao cao ra {path}")
         else:
             print(text)
+    elif args.cmd == "portfolio-risk":
+        return cmd_portfolio_risk(cfg, mc_paths=args.mc,
+                                  horizon_days=args.horizon_days,
+                                  demo=args.demo, alert=args.alert)
     elif args.cmd == "kill-switch":
         if args.action == "on":
             st = killswitch.engage(

@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from . import audit as audit_mod
 from . import outcomes as outcomes_mod
 from . import telegram as telegram_mod
+from .ai import live_hook as ai_hook
 from .data.providers import build_feed
 from .decisions import (
     count_trades_today,
@@ -65,6 +66,20 @@ def _recommend_mode(cfg, recommend_only=False):
         return True
     return bool(((cfg or {}).get("trading") or {}).get(
         "require_confirmation", False))
+
+
+def _ai_fields(sig):
+    """Cac khoa AI gan vao ket qua live (chi khi co du doan).
+
+    Du doan AI la boi canh — ket qua TRADED/RECOMMENDED mang theo
+    de Telegram/outcomes thay; khong co AI thi dict rong (ket qua
+    giu nguyen nhu cu).
+    """
+    if not isinstance(sig, dict) or sig.get("ai_win_prob") is None:
+        return {}
+    return {"ai_win_prob": sig.get("ai_win_prob"),
+            "ai_probs": sig.get("ai_probs"),
+            "ai_model_version": sig.get("ai_model_version")}
 
 
 def _log_outcome(result, sig, cfg, desk, symbol, outcome_store=None):
@@ -269,9 +284,13 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
     (1) doi chieu vi the mo, (2) chan drawdown, (2b) kill switch,
     (2c) gioi han quy Phase F (lo ngay + so vi the mo), (3) chan
     no-trade window, (4) chan daily limit, (5) tin hieu (HOLD thi
-    dung), (6) tinh levels/SL/TP theo ATR + sizing (volume 0 thi
-    dung), (6b) hop nhat PTCB: nhan dinh co ban moi nhat cua desk
-    tong hop voi PTKT (chan khi mau thuan manh — BLOCKED-FA-CONFLICT),
+    dung), (5b) du doan AI outcome — CHI LA BOI CANH (muc 65:
+    gan ai_win_prob/ai_probs/ai_model_version vao tin hieu; khong
+    co mo hinh thi bo qua), (6) tinh levels/SL/TP theo ATR + sizing
+    (volume 0 thi dung), (6b) hop nhat PTCB: nhan dinh co ban moi
+    nhat cua desk tong hop voi PTKT (chan khi mau thuan manh —
+    BLOCKED-FA-CONFLICT), (6c) chan AI opt-in (chi khi
+    ai.block_on_low_win_prob bat — mac dinh TAT),
     (7) place_demo_order (demo-only + margin check nam trong do) —
     TRU KHI che do khuyen nghi bat (config trading.require_confirmation
     hoac recommend_only=True): luc do KHONG dat lenh ma tao lenh cho
@@ -297,8 +316,15 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
     """
     strat = build_strategy(desk, symbol=symbol, cfg=cfg)
     if bars is None:
+        # AI outcome (muc 65) can 81 bar M15 (50 cua so feature + 32
+        # chuoi) — chi lay them khi co file mo hinh cho symbol; khong
+        # co file thi lay 60 bar nhu cu (bars_needed tra None).
+        n_bars = DEFAULT_BARS
+        needed = ai_hook.bars_needed(cfg, symbol)
+        if needed is not None:
+            n_bars = max(n_bars, needed)
         try:
-            bars = feed.bars(DEFAULT_BARS)
+            bars = feed.bars(n_bars)
         except (ConnectionError, ValueError) as exc:
             print(f"LOI lay nen ({symbol}): {exc}")
             return {"symbol": symbol, "action": "ERROR", "status": "ERROR",
@@ -345,6 +371,17 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
                 "reason": f"khong tinh duoc tin hieu/gia: {exc}"}
     print(f"Gia moi nhat {symbol}: {entry}")
     print(f"Tin hieu: {sig}")
+    # (5b) Du doan AI outcome (muc 65) — CHI LA BOI CANH: gan
+    # ai_win_prob / ai_probs / ai_model_version vao dict tin hieu
+    # (de outcomes log lai); khong doi gate nao o duoi. Khong co
+    # mo hinh / het han / hong / chua cai torch / khong du bar thi
+    # hook tra None, in toi da 1 canh bao, tin hieu chay tiep nhu cu.
+    ai_pred = ai_hook.attach_ai_prediction(cfg, symbol, bars, sig)
+    if ai_pred is not None:
+        print(f"AI outcome ({symbol}): xac suat thang du doan "
+              f"{ai_pred['ai_win_prob']:.0%} "
+              f"(mo hinh {ai_pred['ai_model_version']}) — chi la boi "
+              "canh, khong doi gate/lenh.")
     # Ten tren broker (vd 'EURUSDm' tren server Trial): feed MT5Feed
     # giai quyet qua broker_symbol(); feed gia khong co ham do thi
     # dung ten chuan. Ten noi bo / log van giu ten chuan.
@@ -472,6 +509,28 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
                 "status": "BLOCKED-FA-CONFLICT", "reason": reason,
                 "price": entry, "sl": sl, "tp": tp, "volume": vol,
                 "fa_note": fa_note}
+    # (6c) Chan AI opt-in (muc 65) — CHI khi Phu bat tay
+    # ai.block_on_low_win_prob (mac dinh TAT = khong chan). Dat SAU
+    # moi gate cung (drawdown/kill switch/gioi han quy/no-trade/
+    # daily limit/PTCB) va TRUOC khi dat lenh, nen no chi chan them
+    # lenh sap dat — khong bao gio mo duong cho lenh nao, khong doi
+    # size/risk, khong ghi de tong hop TA+FA. Khong co du doan AI
+    # thi khong chan gi ca.
+    if ai_hook.should_block_ai(cfg, ai_pred):
+        ai_cfg = ai_hook.resolve_ai_config(cfg)
+        reason = (f"AI du doan xac suat thang thap "
+                  f"({ai_pred['ai_win_prob']:.0%} < "
+                  f"{ai_cfg['min_win_prob']:.0%}) — chan theo cau hinh "
+                  "ai.block_on_low_win_prob")
+        log_decision(symbol, "BLOCKED-AI-LOW-WIN-PROB", reason,
+                     desk=desk, manager=manager)
+        print(f"CHAN: {reason} ({symbol}).")
+        blocked = {"symbol": symbol, "action": "BLOCKED-AI-LOW-WIN-PROB",
+                   "status": "BLOCKED-AI-LOW-WIN-PROB", "reason": reason,
+                   "price": entry, "sl": sl, "tp": tp, "volume": vol,
+                   "fa_note": fa_note}
+        blocked.update(_ai_fields(sig))
+        return blocked
     # (7) Dat lenh DEMO: chan demo-only + margin check nam TRONG
     # place_demo_order (sau chan demo-only, truoc order_send).
     # Che do khuyen nghi: moi gate tren da vuot qua giong het duong dat
@@ -517,6 +576,7 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
                   "time": when.isoformat(), "fa_note": fa_note,
                   "size_scale": size_scale,
                   "pending_id": pending_id}
+        result.update(_ai_fields(sig))
         _log_outcome(result, sig, cfg, desk, symbol, outcome_store)
         return result
     try:
@@ -548,6 +608,7 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
                "risk_usd": risk_usd, "manager": manager,
                "time": when.isoformat(), "fa_note": fa_note,
                "size_scale": size_scale}
+    outcome.update(_ai_fields(sig))
     _log_outcome(outcome, sig, cfg, desk, symbol, outcome_store)
     return outcome
 

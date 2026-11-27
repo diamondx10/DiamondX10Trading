@@ -62,6 +62,107 @@ def _max_dd_pct(curve):
     return worst
 
 
+def _num(value, default=0.0):
+    """float(value) an toan cho muc rui ro danh muc (None / chuoi loi
+    thi ve default — bao cao ngay khong bao gio crash vi 1 con so)."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _portfolio_risk_section(cfg, positions):
+    """Muc rui ro danh muc cho bao cao ngay (chi doc — khong chan lenh).
+
+    Khong co vi the mo thi tra muc rong NGAY (khong goi engine, khong
+    doc kho lich su) de bao cao luon re. Co vi the thi goi engine voi
+    mc_paths nho (1000) de bao cao khong treo. Moi loi (thieu module,
+    thieu lich su, loi engine) deu tra muc {"available": False} —
+    format_report in dong thoai hoa, KHONG raise.
+    """
+    if not positions:
+        return {"available": True, "has_positions": False,
+                "warnings": ["khong co vi the mo"], "notes": []}
+    try:
+        from .portfolio_risk import build_portfolio_risk_report
+    except ImportError:
+        return {"available": False,
+                "reason": "chua co module portfolio_risk"}
+    store = None
+    try:
+        from .data.history import HistoryStore
+        hist = (cfg or {}).get("history") or {}
+        store = HistoryStore(hist.get("db_path") or "data/history.db")
+    except Exception:  # noqa: BLE001 — khong mo duoc kho thi de engine tu xu
+        store = None
+    try:
+        rep = build_portfolio_risk_report(
+            cfg, mc_paths=1000, store=store, positions=positions)
+        rep["available"] = True
+        return rep
+    except Exception as exc:  # noqa: BLE001 — bao cao ngay khong crash vi muc nay
+        msg = str(exc)
+        low = msg.lower()
+        reason = ("khong co du lieu lich su" if "lich su" in low
+                  or "history" in low else msg)
+        return {"available": False, "reason": reason}
+    finally:
+        if store is not None:
+            close = getattr(store, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001 — dong kho loi thi thoi
+                    pass
+
+
+def _format_portfolio_risk_lines(pr):
+    """Cac dong muc rui ro danh muc cho format_report (khong bao gio
+    raise — moi gia tri deu doc phong thu qua _num / .get)."""
+    lines = ["Rui ro danh muc (VaR / Monte Carlo / stress — chi bao cao, "
+             "khong chan lenh):"]
+    if not (pr or {}).get("available", True):
+        lines.append("  - khong co du lieu lich su "
+                     f"({(pr or {}).get('reason') or 'khong tinh duoc'})")
+        return lines
+    if not (pr or {}).get("has_positions"):
+        lines.append("  - khong co vi the mo")
+        return lines
+    var = pr.get("var") or {}
+    lines.append(
+        f"  - VaR 95%: parametric {_num(var.get('parametric_95')):.2f} "
+        f"USD | lich su {_num(var.get('historical_95')):.2f} USD | "
+        f"Monte Carlo {_num(var.get('mc_95')):.2f} USD "
+        f"(gioi han {_num(var.get('limit_usd')):.2f} USD)"
+        + (" — VUOT GIOI HAN" if var.get("breached") else ""))
+    mc = pr.get("mc") or {}
+    lines.append(
+        f"  - Monte Carlo ({mc.get('paths') or '?'} duong, "
+        f"{mc.get('horizon_days') or '?'} ngay): P&L trung binh "
+        f"{_num(mc.get('mean_pnl')):+.2f} USD, p5 "
+        f"{_num(mc.get('p5')):+.2f} USD, xac suat vuot drawdown "
+        f"{_num(mc.get('prob_breach_drawdown_pct')):.1f}%")
+    comp = pr.get("component_var") or []
+    if comp:
+        top = max(comp, key=lambda c: _num(c.get("var_usd")))
+        lines.append(
+            f"  - Component VaR lon nhat: {top.get('symbol')} "
+            f"({_num(top.get('var_usd')):.2f} USD, "
+            f"{_num(top.get('share_pct')):.1f}%)")
+    stress = pr.get("stress") or []
+    if stress:
+        worst = min(stress, key=lambda s: _num(s.get("pnl_usd")))
+        lines.append(
+            f"  - Stress te nhat: {worst.get('name')} "
+            f"{_num(worst.get('pnl_usd')):+.2f} USD "
+            f"({_num(worst.get('pnl_pct')):+.2f}%)"
+            + (" — VUOT DRAWDOWN" if worst.get("breaches_drawdown")
+               else ""))
+    for w in list(pr.get("warnings") or [])[:5]:
+        lines.append(f"  - Canh bao: {w}")
+    return lines
+
+
 def _fund_limits_section(cfg, positions, rows, day):
     """Muc gioi han quy (Phase F) cho bao cao: gia tri cau hinh + trang
     thai hien tai. Lo hom nay cong tu dong CLOSE trong log ngay `day`."""
@@ -169,6 +270,7 @@ def build_report(cfg, log_path=None, state_path=None, today=None,
         },
         "desks": per_desk,
         "open_positions": positions,
+        "portfolio_risk": _portfolio_risk_section(cfg, positions),
         "trades_today": trades_today,
         "blocked": blocked[-10:],
         "recommended": recommended[-10:],
@@ -203,6 +305,12 @@ def format_report(rep):
             f"{float(p['entry']):g}, SL {float(p['sl']):g}, "
             f"TP {float(p['tp']):g}, {float(p['volume']):g} lot, "
             f"mo ngay {p.get('opened_date', '')}")
+    try:
+        lines.extend(_format_portfolio_risk_lines(
+            rep.get("portfolio_risk")))
+    except Exception:  # noqa: BLE001 — muc rui ro khong bao gio hong bao cao
+        lines.append("Rui ro danh muc: khong tinh duoc "
+                     "(khong co du lieu lich su).")
     lines.append(f"Lenh moi hom nay ({rep['date']}): "
                  + (", ".join(f"{s}: {n}" for s, n in
                               sorted(rep["trades_today"].items()))

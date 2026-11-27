@@ -45,6 +45,25 @@ risk:
   fund_daily_loss_pct: 3.0
   max_open_positions_fund: 10
   max_open_positions_desk: 2
+  # Rui ro DANH MUC (xem portfolio_risk.py): VaR toan danh muc la CHI
+  # SO BAO CAO + canh bao, KHONG chan lenh (chan lenh van theo
+  # drawdown 10% / kill switch / gioi han quy o tren).
+  # portfolio_var_limit_pct: VaR 95% vuot so % von quy nay thi bao cao
+  # danh dau breached (mac dinh 2% = 200 USD tren von 10.000 USD).
+  portfolio_var_limit_pct: 2.0
+  # Monte Carlo: so path + chan (ngay) mac dinh.
+  mc_paths: 10000
+  mc_horizon_days: 1
+  # Kich ban stress (shock theo %; vd -30 = -30% gia symbol do).
+  # Symbol LA trong scenario -> bao loi LOUD khi load, khong bo qua.
+  stress_scenarios:
+    - {name: "Crypto crash", shocks: {BTCUSD: -30, ETHUSD: -30, BNBUSD: -30}}
+    - {name: "Co phieu My crash", shocks: {AMD: -20, NVDA: -20, INTC: -20, CDNS: -20, SNPS: -20}}
+    - {name: "Vang tang manh", shocks: {XAUUSD: 10}}
+    - {name: "Vang giam manh", shocks: {XAUUSD: -10}}
+    - {name: "USD manh len", shocks: {EURUSD: -2}}
+    - {name: "Tat ca rui ro giam", shocks: {EURUSD: -10, XAUUSD: -10, BTCUSD: -10, ETHUSD: -10, BNBUSD: -10, AMD: -10, CDNS: -10, SNPS: -10, INTC: -10, NVDA: -10}}
+    - {name: "Soc kieu 2020", shocks: {AMD: -30, NVDA: -30, INTC: -30, CDNS: -30, SNPS: -30, BTCUSD: -40, ETHUSD: -40, BNBUSD: -40, XAUUSD: 5, EURUSD: -3}}
   default_stop_loss_pct: 5.0
   default_take_profit_pct: 5.0
 # Chien luoc chung Phase 2 (docs/phase0-desk-rules.md, Phu duyet 2026-11-27):
@@ -153,6 +172,17 @@ ai:
   seq_len: 32
   # So bar gan nhat dung de xep hang ung vien tham so (ai-tune).
   rank_bars: 2000
+  # Chan lenh theo AI — OPT-IN (muc 65), mac dinh TAT: chi khi bat,
+  # tin hieu BUY/SELL vuot moi gate ma ai_win_prob < min_win_prob
+  # thi bi chan thanh BLOCKED-AI-LOW-WIN-PROB (sau gate PTCB, truoc
+  # khi dat lenh). Mac dinh false = AI chi la boi canh trong tin
+  # hieu + outcome log, khong doi hanh vi live.
+  block_on_low_win_prob: false
+  # Nguong xac suat thang toi thieu khi bat chan o tren.
+  min_win_prob: 0.30
+  # Model cu hon so ngay nay thi coi nhu het han: live chay tiep
+  # khong co AI (train lai bang ai-train). None = khong gioi han.
+  max_age_days: 90
 # Multi-timeframe TA v1 (xem multitimeframe.py): trend H1 loc tin
 # hieu entry M15 — tin hieu nguoc trend H1 manh bi chan thanh HOLD.
 # Thieu muc nay thi loc TAT (M15-only, hanh vi cu). Timing M5 va
