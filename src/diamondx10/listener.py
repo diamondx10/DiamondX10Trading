@@ -34,6 +34,7 @@ duoc truyen vao (de test) hoac import lazy luc chay — xem run_listener.
 import time
 
 from . import execution, killswitch
+from .data.mt5_feed import build_symbol_map, resolve_mt5_symbol
 from .decisions import log_decision
 
 DEFAULT_MAX_ENTRY_DEVIATION_PCT = 1.0
@@ -70,12 +71,13 @@ def _max_deviation_pct(cfg):
         return DEFAULT_MAX_ENTRY_DEVIATION_PCT
 
 
-def _latest_price(mt5, symbol, price_fn=None):
+def _latest_price(mt5, symbol, price_fn=None, broker_symbol=None):
     """Gia thi truong moi nhat (bid) — giong MT5Feed.latest_price.
 
-    price_fn (neu co, de test): ham lay gia theo symbol. Neu khong,
-    doc truc tiep mt5.symbol_info_tick(symbol). Tra None neu khong
-    lay duoc gia (nguoi goi tu choi lenh thay vi doan gia).
+    price_fn (neu co, de test): ham lay gia theo symbol (ten chuan).
+    Neu khong, doc truc tiep mt5.symbol_info_tick(broker_symbol neu co,
+    khong thi symbol). Tra None neu khong lay duoc gia (nguoi goi tu
+    choi lenh thay vi doan gia).
     """
     if price_fn is not None:
         try:
@@ -85,7 +87,7 @@ def _latest_price(mt5, symbol, price_fn=None):
     if mt5 is None or not hasattr(mt5, "symbol_info_tick"):
         return None
     try:
-        tick = mt5.symbol_info_tick(symbol)
+        tick = mt5.symbol_info_tick(broker_symbol or symbol)
     except Exception:  # noqa: BLE001 — khong lay duoc tick thi tra None
         return None
     if tick is None:
@@ -243,16 +245,43 @@ def place_pending_order(cfg, mt5, store, order_id, kill_switch_path=None,
     except Exception:
         return {"ok": False, "ticket": None,
                 "reason": "Not a demo account", "kind": "refused"}
+    # 2b. Ten tren broker (vd 'EURUSDm' tren server Trial): giai quyet
+    # truoc khi lay gia / kiem tra ky quy / dat lenh. Server uu tien
+    # config mt5.server, roi xuong server tai khoan dang dang nhap;
+    # suffix tu config mt5.symbol_suffix (mac dinh "auto" — suy ra
+    # tu ten server). Khong co ten nao thi tu choi, lenh cho giu
+    # nguyen pending.
+    mt5_cfg = (cfg or {}).get("mt5") or {}
+    resolve_server = mt5_cfg.get("server") or server
+    suffix = mt5_cfg.get("symbol_suffix", "auto")
+    broker_symbol = symbol
+    if mt5 is not None:
+        try:
+            resolved = build_symbol_map(
+                mt5, [symbol], resolve_server, suffix).get(symbol)
+        except Exception as exc:  # noqa: BLE001 — khong giai quyet duoc
+            print(f"LOI listener build_symbol_map: {exc}")
+            resolved = None
+        if resolved is None:
+            tried = resolve_mt5_symbol(symbol, resolve_server, suffix)
+            tried_txt = (f"{tried!r} and {symbol!r}" if tried != symbol
+                         else f"{tried!r}")
+            return {"ok": False, "ticket": None,
+                    "reason": f"Symbol {symbol} not found on MT5 server "
+                              f"{resolve_server!r} (tried {tried_txt})",
+                    "kind": "refused"}
+        broker_symbol = resolved
     # 3. Gia thi truong luc dat (dung cho ca margin check, do lech
     #    entry va gia vao lenh).
-    price = _latest_price(mt5, symbol, price_fn)
+    price = _latest_price(mt5, symbol, price_fn, broker_symbol=broker_symbol)
     if price is None:
         return {"ok": False, "ticket": None,
                 "reason": "Could not get market price", "kind": "refused"}
     # 4. Ky quy (helper cua execution.py).
     try:
         margin_ok, _margin_msg = execution.check_margin(
-            mt5, symbol, order.get("volume"), price, account_info)
+            mt5, symbol, order.get("volume"), price, account_info,
+            broker_symbol=broker_symbol)
     except Exception as exc:  # noqa: BLE001 — kiem tra loi thi chan
         print(f"LOI listener check_margin: {exc}")
         margin_ok = False
@@ -278,7 +307,8 @@ def place_pending_order(cfg, mt5, store, order_id, kill_switch_path=None,
             volume=order.get("volume"), price=price,
             sl=order.get("sl"), tp=order.get("tp"),
             desk=desk, manager=manager, cfg=cfg,
-            account_info=account_info, server=server)
+            account_info=account_info, server=server,
+            broker_symbol=broker_symbol)
     except Exception as exc:
         # Dat that bai: GIU NGUYEN pending de thu lai trong TTL.
         print(f"LOI listener place_demo_order {order_id!r}: {exc}")

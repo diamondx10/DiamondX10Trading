@@ -155,6 +155,54 @@ def check_terminal(mt5_module=None, path=None):
             pass
 
 
+def _mt5_symbol_suffix(cfg):
+    """Hau to symbol MT5 truyen cho MT5Feed / build_symbol_map.
+
+    Doc tu cfg mt5.symbol_suffix (mac dinh "auto"): "auto" (hoac
+    thieu) -> None, de ham ben mt5_feed tu nhan theo ten server
+    (Trial -> "m", Real -> ""); "m" hoac "" thi ep buoc theo gia tri
+    do. Ten symbol chuan trong config KHONG doi.
+    """
+    raw = ((cfg or {}).get("mt5") or {}).get("symbol_suffix", "auto")
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    if value.lower() == "auto":
+        return None
+    return value
+
+
+def check_demo_symbols(feed, cfg, server, suffix=None):
+    """Kiem tra symbol tren server demo qua build_symbol_map.
+
+    In 1 dong moi symbol: "[co] EURUSD -> EURUSDm (desk forex)" khi
+    tim thay, "[THIEU] ..." khi khong co. Tra (mapping, missing):
+    mapping {ten chuan: ten broker | None}, missing [ten chuan, ...].
+    Ten broker lay tu build_symbol_map trong mt5_feed (khong tu doan
+    hau to o day): Trial chi co *m, Real chi co ten goc.
+    """
+    from diamondx10.data.mt5_feed import build_symbol_map, resolve_mt5_symbol
+    mapping = {}
+    missing = []
+    for desk in DESKS:
+        symbols = (cfg.get("data", {}).get("symbols", {}) or {}).get(desk) or []
+        if not symbols:
+            continue
+        found = build_symbol_map(feed.mt5, list(symbols), server, suffix)
+        mapping.update(found)
+        for sym in symbols:
+            broker = found.get(sym)
+            if broker is None:
+                missing.append(sym)
+                suffixed = resolve_mt5_symbol(sym, server, suffix)
+                tried = [suffixed] if suffixed == sym else [suffixed, sym]
+                print(f"    [THIEU] {sym} (desk {desk}) — khong co tren "
+                      f"server {server!r} (da thu: {', '.join(tried)})")
+            else:
+                print(f"    [co] {sym} -> {broker} (desk {desk})")
+    return mapping, missing
+
+
 def _ask(prompt, default=None):
     """Hoi 1 gia tri; Enter thi lay mac dinh (neu co)."""
     hint = f" [{default}]" if default else ""
@@ -496,11 +544,13 @@ def main(argv=None):
         print(f"  LOI: {exc}")
         return 1
     cfg = load_config()
+    suffix = _mt5_symbol_suffix(cfg)
     first_symbol = (cfg.get("data", {}).get("symbols", {}) or {}).get("forex", ["EURUSD"])[0]
     try:
         feed = MT5Feed(first_symbol, login=int(login), server=server,
-                       path=terminal)
-    except (ImportError, ConnectionError, ValueError) as exc:
+                       path=terminal, symbol_suffix=suffix)
+    except (ImportError, ConnectionError, ValueError, TypeError) as exc:
+        # TypeError: MT5Feed chua nhan symbol_suffix (ban mt5_feed cu).
         print(f"  LOI: {exc}")
         return 1
     try:
@@ -512,11 +562,17 @@ def main(argv=None):
               f"server {getattr(account, 'server', server)}, "
               f"so du {getattr(account, 'balance', '?')}")
         print("  Symbol tren server demo:")
-        for desk in DESKS:
-            symbols = (cfg.get("data", {}).get("symbols", {}) or {}).get(desk) or []
-            for sym in symbols:
-                ok = feed.mt5.symbol_info(sym) is not None
-                print(f"    [{'co' if ok else 'THIEU'}] {sym} (desk {desk})")
+        try:
+            _mapping, missing = check_demo_symbols(feed, cfg, server, suffix)
+        except ImportError as exc:
+            # build_symbol_map chua co trong mt5_feed (ban cu).
+            print(f"  LOI: {exc}")
+            return 1
+        if missing:
+            print(f"  LOI: thieu {len(missing)} symbol tren server "
+                  f"{server!r} — kiem tra lai ten server / tai khoan demo, "
+                  "roi chay lai.")
+            return 1
     finally:
         feed.close()
 

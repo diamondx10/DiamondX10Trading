@@ -53,6 +53,9 @@ def build_feed(cfg, desk, symbol=None, mt5_module=None):
             # de trong (None) thi MT5Feed tu tim: bien moi truong
             # MT5_TERMINAL_PATH roi auto-scan (xem mt5_feed.py).
             path=mt5_cfg.get("terminal_path") or None,
+            # Hau to symbol tren broker ("m" tren server Trial):
+            # "auto" (mac dinh) thi suy ra tu ten server.
+            symbol_suffix=mt5_cfg.get("symbol_suffix", "auto"),
         )
     raise ValueError(
         f"Provider du lieu khong biet: {provider!r} "

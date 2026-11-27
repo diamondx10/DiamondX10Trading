@@ -122,6 +122,74 @@ def redact_for_test(text):
     return text
 
 
+def _mt5_symbol_suffix(cfg):
+    """Hau to symbol MT5 truyen cho MT5Feed / build_symbol_map.
+
+    Doc tu cfg mt5.symbol_suffix (mac dinh "auto"): "auto" (hoac
+    thieu) -> None, de ham ben mt5_feed tu nhan theo ten server
+    (Trial -> "m", Real -> ""); "m" hoac "" thi ep buoc theo gia tri
+    do. Ten symbol chuan trong config KHONG doi.
+    """
+    raw = ((cfg or {}).get("mt5") or {}).get("symbol_suffix", "auto")
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    if value.lower() == "auto":
+        return None
+    return value
+
+
+def check_demo_symbol_map(mt5_mod, symbols_cfg, server, suffix=None, log=None):
+    """Map ten symbol chuan -> ten broker tren server MT5.
+
+    Dung build_symbol_map trong mt5_feed (khong tu doan hau to o day):
+    Trial chi co *m, Real chi co ten goc. Tra (mapping, missing):
+    mapping {ten chuan: ten broker | None}, missing [(ten chuan, desk,
+    [ten da thu]), ...]. Ghi 1 dong log moi symbol neu co log, vd
+    "EURUSD -> EURUSDm (desk forex)".
+    """
+    from diamondx10.data.mt5_feed import build_symbol_map, resolve_mt5_symbol
+    all_symbols = [(desk, sym)
+                   for desk in DESKS
+                   for sym in (symbols_cfg or {}).get(desk) or []]
+    mapping = build_symbol_map(mt5_mod, [s for _, s in all_symbols],
+                               server, suffix)
+    missing = []
+    for desk, sym in all_symbols:
+        broker = mapping.get(sym)
+        if broker is None:
+            suffixed = resolve_mt5_symbol(sym, server, suffix)
+            tried = [suffixed] if suffixed == sym else [suffixed, sym]
+            missing.append((sym, desk, tried))
+            if log is not None:
+                log.log(f"  {sym} -> THIEU (desk {desk}, da thu "
+                        f"{', '.join(tried)} tren server {server!r})")
+        elif log is not None:
+            log.log(f"  {sym} -> {broker} (desk {desk})")
+    return mapping, missing
+
+
+def _missing_symbols_detail(missing, server):
+    """Chuoi mo ta symbol thieu: ten + desk + ca 2 ten da thu + server."""
+    return "; ".join(
+        f"{sym} (desk {desk}, da thu {', '.join(tried)} "
+        f"tren server {server!r})"
+        for sym, desk, tried in missing)
+
+
+def _mt5_feed_for_symbol(sym, cfg, terminal_path):
+    """Tao MT5Feed cho 1 symbol, truyen symbol_suffix tu cfg.
+
+    symbol_suffix "auto" (mac dinh) -> None, de MT5Feed tu nhan theo
+    ten server (Trial -> "m", Real -> ""); "m"/"" thi ep buoc.
+    """
+    from diamondx10.data.mt5_feed import MT5Feed
+    mt5_cfg = (cfg or {}).get("mt5") or {}
+    return MT5Feed(sym, login=mt5_cfg.get("login"),
+                   server=mt5_cfg.get("server"), path=terminal_path,
+                   symbol_suffix=_mt5_symbol_suffix(cfg))
+
+
 # ------------------------------------------------------------------ main
 def main(argv=None):
     p = argparse.ArgumentParser(description="DiamondX10 test run (MT5 DEMO)")
@@ -287,16 +355,17 @@ def main(argv=None):
         def _symbols():
             cfg = ctx["cfg"]
             mt5_mod = ctx["mt5"]
-            symbols = cfg.get("data", {}).get("symbols", {})
-            missing = []
-            for desk in DESKS:
-                for sym in symbols.get(desk) or []:
-                    if mt5_mod.symbol_info(sym) is None:
-                        missing.append(sym)
+            server = (ctx.get("server")
+                      or (cfg.get("mt5") or {}).get("server") or "")
+            suffix = _mt5_symbol_suffix(cfg)
+            mapping, missing = check_demo_symbol_map(
+                mt5_mod, cfg.get("data", {}).get("symbols", {}), server,
+                suffix, log=log)
             if missing:
-                raise RuntimeError("symbol THIEU tren server demo: "
-                                   + ", ".join(missing))
-            total = sum(len(v or []) for v in symbols.values())
+                raise RuntimeError(
+                    "symbol THIEU tren server demo: "
+                    + _missing_symbols_detail(missing, server))
+            total = len(mapping)
             return f"ca {total} symbol deu co tren server demo"
 
         if mt5_ok:
@@ -310,20 +379,16 @@ def main(argv=None):
         log.section("[4] Nen M15 + tin hieu (chi tinh, KHONG dat lenh)")
 
         def _bars_and_signals():
-            from diamondx10.data.mt5_feed import MT5Feed
             from diamondx10.signals import generate_signals
             from diamondx10.strategies import build_strategies
             cfg = ctx["cfg"]
-            mt5_cfg = cfg.get("mt5") or {}
-            login = mt5_cfg.get("login")
-            server = mt5_cfg.get("server")
             strategies = build_strategies(cfg.get("strategy"))
             lines = []
             for desk in DESKS:
                 for sym in (cfg.get("data", {}).get("symbols", {})
                             .get(desk) or []):
-                    feed = MT5Feed(sym, login=login, server=server,
-                                   path=ctx.get("terminal_path"))
+                    feed = _mt5_feed_for_symbol(sym, cfg,
+                                                ctx.get("terminal_path"))
                     try:
                         bars = feed.bars(60)
                         latest = feed.latest_price(sym)

@@ -134,7 +134,8 @@ def _order_type(mt5, action):
     return getattr(mt5, "ORDER_TYPE_SELL", MT5_ORDER_TYPE_SELL)
 
 
-def check_margin(mt5, symbol, volume, price, account_info=None):
+def check_margin(mt5, symbol, volume, price, account_info=None,
+                 broker_symbol=None):
     """Kiem tra ky quy kha dung truoc khi gui lenh (Q3, Phase 4).
 
     - mt5 co order_check: goi order_check voi request tuong tu lenh that;
@@ -142,12 +143,14 @@ def check_margin(mt5, symbol, volume, price, account_info=None):
     - mt5 la None hoac khong co order_check (che do mo phong): bo qua,
       tra (True, ...) voi ghi chu ro rang.
     Tra (ok, message). Khong bao gio raise — place_demo_order quyet dinh.
+    broker_symbol: ten tren broker (vd 'EURUSDm' tren Trial); neu co thi
+    order_check dung ten do, con log/ly do van dung ten chuan `symbol`.
     """
     if mt5 is None or not hasattr(mt5, "order_check"):
         return True, "bo qua kiem tra ky quy o che do mo phong (khong co MT5)"
     request = {
         "action": getattr(mt5, "TRADE_ACTION_DEAL", 1),
-        "symbol": symbol,
+        "symbol": broker_symbol or symbol,
         "volume": float(volume),
         "type": getattr(mt5, "ORDER_TYPE_BUY", MT5_ORDER_TYPE_BUY),
         "price": float(price),
@@ -170,13 +173,17 @@ def check_margin(mt5, symbol, volume, price, account_info=None):
 
 def place_demo_order(mt5, *, symbol, action, volume, price, sl, tp=None,
                      desk, manager, cfg=None, account_info=None, server=None,
-                     dry_run=False, comment="DiamondX10 DEMO"):
+                     dry_run=False, comment="DiamondX10 DEMO",
+                     broker_symbol=None):
     """Dat lenh DEMO qua MT5. Tra ve dict ket qua; dry_run thi khong gui lenh.
 
     - action: 'BUY' / 'SELL' (khong dat lenh khi 'HOLD').
     - volume: lot MT5. price: gia vao lenh. sl: stop loss (bat buoc).
     - cfg/account_info/server: de chay chan DEMO-ONLY truoc khi gui.
     - Moi lenh (ke ca dry-run) deu ghi vao decisions log.
+    - broker_symbol: ten tren broker (vd 'EURUSDm' tren Trial); neu co
+      thi request order_send/order_check dung ten do, con log/ly do
+      van dung ten chuan `symbol`.
     """
     if action not in ("BUY", "SELL"):
         raise ValueError(f"Khong dat lenh voi action {action!r} (chi BUY/SELL)")
@@ -189,7 +196,7 @@ def place_demo_order(mt5, *, symbol, action, volume, price, sl, tp=None,
         check_demo_only(cfg or {"mt5": {"demo_only": True}}, mt5, account_info, server)
     request = {
         "action": getattr(mt5, "TRADE_ACTION_DEAL", 1),
-        "symbol": symbol,
+        "symbol": broker_symbol or symbol,
         "volume": float(volume),
         "type": _order_type(mt5, action),
         "price": float(price),
@@ -208,7 +215,9 @@ def place_demo_order(mt5, *, symbol, action, volume, price, sl, tp=None,
         return {"status": "DRY_RUN", "request": request, "order": None}
     # Kiem tra ky quy (Q3, Phase 4): SAU chan DEMO-ONLY, TRUOC order_send.
     # Che do mo phong (khong co MT5/order_check) thi bo qua va ghi ro vao log.
-    margin_ok, margin_msg = check_margin(mt5, symbol, volume, price, account_info)
+    margin_ok, margin_msg = check_margin(mt5, symbol, volume, price,
+                                         account_info,
+                                         broker_symbol=broker_symbol)
     if not margin_ok:
         raise RuntimeError(
             f"Khong du ky quy de dat lenh demo {symbol} {action} "
@@ -233,9 +242,20 @@ def place_demo_order(mt5, *, symbol, action, volume, price, sl, tp=None,
             "margin_check": margin_msg}
 
 
-def check_symbols_available(mt5, symbols):
-    """Tra ve (co, thieu): danh sach symbol co / khong co tren server demo."""
+def check_symbols_available(mt5, symbols, server=None, suffix=None):
+    """Tra ve (co, thieu): danh sach symbol co / khong co tren server demo.
+
+    Tra ve ten CHUAN. Khi truyen server/suffix thi kiem tra TEN TREN
+    BROKER (resolve_mt5_symbol); khi khong truyen ca 2 thi giu hanh vi
+    cu (kiem tra ten chuan).
+    """
+    from .data.mt5_feed import resolve_mt5_symbol
+
     have, missing = [], []
     for symbol in symbols:
-        (have if mt5.symbol_info(symbol) is not None else missing).append(symbol)
+        if server is None and suffix is None:
+            name = symbol
+        else:
+            name = resolve_mt5_symbol(symbol, server, suffix)
+        (have if mt5.symbol_info(name) is not None else missing).append(symbol)
     return have, missing

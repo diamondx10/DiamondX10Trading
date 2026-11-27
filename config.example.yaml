@@ -107,6 +107,13 @@ mt5:
   # MT5_TERMINAL_PATH. Duong dan Windows ghi bang dau / de YAML doc
   # duoc (vd C:/Program Files/MetaTrader 5 EXNESS/terminal64.exe).
   terminal_path: ""
+  # Hau to symbol cua server Exness: server TRIAL them "m" vao moi
+  # symbol (EURUSD -> EURUSDm), server REAL khong co hau to.
+  # "auto" (mac dinh): tu nhan theo ten server (chua "Trial" -> "m",
+  # "Real" -> ""); dat "m" hoac "" de ep buoc, khong theo server.
+  # Ten symbol chuan trong data.symbols KHONG doi — hau to chi ap
+  # dung khi noi voi MT5 (xem mt5_feed.build_symbol_map).
+  symbol_suffix: "auto"
 # Vong lap live (Phase D — xem docs/live-loop.md).
 # `live --once` chay 1 chu ky roi thoat (dung cho Task Scheduler/cron);
 # khong --once thi lap toi bien nen tiep theo toi khi Ctrl+C.

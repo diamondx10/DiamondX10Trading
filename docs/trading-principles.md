@@ -594,6 +594,20 @@
     khong chua token hay du lieu phien, file runtime da gitignore)
     de web UI hien thi trang thai lan chay cuoi. Khong bao gio luu
     verdict chua kiem tra (muc 46).
+50. **[ĐÃ CÓ — 2026-11-27] Symbol tren server Exness Trial co hau to
+    "m"; ten chuan giu noi bo, chi bien MT5 moi dich**
+    (`data/mt5_feed.py` `resolve_mt5_symbol` / `build_symbol_map`,
+    `mt5.symbol_suffix` trong `config.example.yaml`, xem
+    `docs/mt5-demo.md` §4b): server Trial them "m" vao moi symbol
+    (EURUSD -> EURUSDm), server Real thi khong; hau to suy ra tu ten
+    server ("Trial" -> "m", "Real" -> "", khong ro -> ""), mac dinh
+    `mt5.symbol_suffix: "auto"`, ghi de bang `"m"` hoac `""`. Ten
+    chuan (EURUSD...) giu nguyen trong config, decisions log, tong
+    hop, briefing, Telegram va bao cao; chi cac loi goi MT5 moi dung
+    ten broker. Bang anh xa chuan -> broker lap sau khi dang nhap,
+    thu `[ten co hau to, ten chuan]` qua `symbol_info`, ten nao co
+    tren server thi dung; ca hai ten deu khong co thi bao loi neu ro
+    ca hai ten da thu + server.
 
 ## 8. Những điểm đang lệch giữa nghiên cứu và code
 

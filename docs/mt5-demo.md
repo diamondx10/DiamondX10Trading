@@ -187,6 +187,75 @@ Volume mac dinh duoc tinh tu von desk (2.500 USD, chia deu cho cac
 symbol cua desk) va `max_risk_per_trade_pct` (1%) trong config, lam tron
 xuong buoc 0.01 lot. Muon tu chon volume: them `--volume 0.01`.
 
+## 4b. Server Trial them hau to "m" vao ten symbol
+
+**Server Trial cua Exness them chu "m" vao cuoi ten moi symbol:**
+`EURUSD` thanh `EURUSDm`, `XAUUSD` thanh `XAUUSDm`, `BTCUSD` thanh
+`BTCUSDm` — tuong tu cho ETHUSD, BNBUSD, NVDA, AMD, SNPS, INTC, CDNS.
+**Server Real thi khong them hau to** — cung 1 symbol nhung ten tren
+server khac nhau tuy loai server. Day la quy uoc cua Exness, khong
+phai loi cua tool.
+
+**Ten chuan giu nguyen noi bo.** Trong `config.yaml`
+(`data.symbols`), decisions log, tong hop Yuling, briefing, tin
+Telegram va bao cao, symbol luon viet dang chuan khong hau to
+(`EURUSD`). Chi o bien MT5 — luc goi `symbol_info`, lay nen, lay
+gia, dat lenh — tool moi dich sang ten broker (`EURUSDm` tren
+Trial).
+
+**Phat hien hau to tu ten server (sau khi dang nhap):** ten server
+chua "Trial" (vd `Exness-MT5Trial7`) thi hau to la `"m"`; chua
+"Real" thi hau to la `""` (khong hau to); ten khac / khong ro thi
+mac dinh `""` roi de buoc kiem tra ton tai quyet dinh. Sau khi dang
+nhap, tool lap bang anh xa chuan -> broker cho tung symbol bang cach
+thu lan luot `[ten co hau to, ten chuan]` qua `symbol_info` — ten
+nao co tren server thi dung ten do. Ca hai ten deu khong co thi bao
+loi (xem muc xu ly loi ben duoi).
+
+**Ghi de bang config** (`mt5.symbol_suffix`, mac dinh `"auto"` —
+tu phat hien theo ten server). Chi ghi de khi biet chac server cua
+minh thuoc loai nao ma ten server khong noi ro:
+
+```yaml
+mt5:
+  symbol_suffix: "auto"   # mac dinh: "Trial" -> "m", "Real" -> ""
+  # symbol_suffix: "m"    # ep them "m" cho moi symbol
+  # symbol_suffix: ""     # ep khong hau to
+```
+
+**Kiem tra ten symbol trong terminal:** mo cua so **Market Watch**
+trong MT5 terminal — danh sach o do hien dung ten broker tren
+server dang dang nhap (`EURUSDm` neu la Trial). Muon chac 1 symbol:
+chuot phai vao symbol do -> **Specification**, ten day du hien o
+dong dau. Doi chieu voi ten chuan trong `data.symbols` cua config.
+
+**Bang anh xa in ra luc chay:** buoc `[5/8]` cua `quickstart.py`
+va buoc `[3]` cua `test_run.py` in bang anh xa chuan -> broker cho
+moi symbol, vd tren server Trial:
+
+```
+  Symbol tren server demo (anh xa chuan -> broker):
+    [co] EURUSD -> EURUSDm (desk forex)
+    [co] XAUUSD -> XAUUSDm (desk xauusd)
+    [co] BTCUSD -> BTCUSDm (desk crypto)
+```
+
+Neu dong anh xa chi hien ten chuan ma khong co mui ten `->` thi
+server dang dung khong co hau to (Real hoac ten da trung khop).
+
+**Xu ly loi — ca hai ten deu khong co:** loi neu ro ca hai ten da
+thu + ten server, vd `Symbol EURUSD khong co tren server
+Exness-MT5Trial7 (da thu EURUSDm, EURUSD)`. Khi gap loi nay, kiem
+tra theo thu tu: (1) dang dang nhap dung server chua — ten server
+trong thanh trang thai / Navigator cua MT5 terminal co dung ten
+trong config khong (Trial hay Real, nham server la nham ca hau
+to); (2) symbol co ton tai tren server do khong — co symbol (vd
+CDNS) khong co tren server demo (xem muc 5); (3) symbol co hien
+trong Market Watch khong — chua hien thi chuot phai -> **Show all**;
+(4) chinh ta trong `data.symbols` cua config. Khong sua tay ten
+symbol trong config thanh dang co "m" — config giu ten chuan, tool
+tu dich.
+
 ## 5. Gioi han can biet
 
 - **Chua kiem chung ten symbol that tren server demo:** viec kiem tra

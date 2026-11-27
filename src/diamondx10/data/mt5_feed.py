@@ -234,17 +234,77 @@ def _rate_to_bar(rate, include_volume=False):
     return bar
 
 
-def check_symbols(mt5, symbols):
+def resolve_mt5_symbol(symbol, server, suffix=None):
+    """Ten symbol tren broker tu ten chuan (canonical) + server.
+
+    Tren server Exness TRIAL moi symbol deu co hau to 'm'
+    (EURUSD -> EURUSDm); tren server REAL thi khong co hau to.
+    Phan biet Trial/Real bang TEN SERVER (chua "Trial"/"Real",
+    khong phan biet hoa/thuong).
+
+    suffix: neu dat ro (khac None va khac "auto") thi dung luon
+    (vd suffix="m" ep them 'm', suffix="" ep khong hau to);
+    None hoac "auto" thi suy ra tu ten server. Server la/unknown
+    (None hoac khong chua "Trial") thi tra ten goc.
+    """
+    if suffix is not None and suffix != "auto":
+        return symbol + str(suffix)
+    if server is not None and "trial" in str(server).lower():
+        return symbol + "m"
+    return symbol
+
+
+def build_symbol_map(mt5, symbols, server, suffix=None):
+    """Map ten chuan -> ten tren broker ({canonical: broker | None}).
+
+    Voi moi symbol thu cac ung vien theo thu tu
+    [resolve_mt5_symbol(s, server, suffix), s]; ung vien dau tien
+    ma mt5.symbol_info() tra ve khong-None thi thang. Chi kiem tra
+    su ton tai (khong goi symbol_select o day). Neu ca 2 ung vien
+    deu khong co thi gia tri la None. Neu mt5 khong co symbol_info
+    (module gia toi gian) thi khong kiem tra duoc — tra ten chuan
+    de giu hanh vi cu.
+    """
+    symbol_info = getattr(mt5, "symbol_info", None)
+    result = {}
+    for symbol in symbols:
+        mapped = resolve_mt5_symbol(symbol, server, suffix)
+        if symbol_info is None:
+            result[symbol] = symbol
+            continue
+        found = None
+        candidates = [mapped] if mapped == symbol else [mapped, symbol]
+        for candidate in candidates:
+            try:
+                info = symbol_info(candidate)
+            except Exception:  # noqa: BLE001 — coi nhu khong co
+                info = None
+            if info is not None:
+                found = candidate
+                break
+        result[symbol] = found
+    return result
+
+
+def check_symbols(mt5, symbols, server=None, suffix=None):
     """Kiem tra symbol nao co tren server MT5 demo dang noi.
 
-    Tra ve dict {symbol: True/False}. Symbol khong co (vd CDNS co the
-    khong co tren Exness MT5 demo) thi bao False — nguoi dung biet de
-    doi symbol hoac doi nguon du lieu cho desk do, thay vi lenh loi
-    am tham khi chay.
+    Tra ve dict {symbol: True/False} khoa theo TEN CHUAN. Symbol khong co
+    (vd CDNS co the khong co tren Exness MT5 demo) thi bao False — nguoi
+    dung biet de doi symbol hoac doi nguon du lieu cho desk do, thay vi
+    lenh loi am tham khi chay.
+
+    Khi truyen server/suffix: kiem tra TEN TREN BROKER
+    (resolve_mt5_symbol) thay vi ten chuan. Khi khong truyen ca 2 thi
+    giu hanh vi cu (kiem tra ten chuan).
     """
     result = {}
     for symbol in symbols:
-        info = mt5.symbol_info(symbol)
+        if server is None and suffix is None:
+            name = symbol
+        else:
+            name = resolve_mt5_symbol(symbol, server, suffix)
+        info = mt5.symbol_info(name)
         result[symbol] = info is not None
     return result
 
@@ -269,15 +329,22 @@ class MT5Feed(DataFeed):
         duong dan da chon ma initialize(path=...) that bai thi BAO LOI
         chu KHONG tu doi sang initialize() khong duong dan (co the
         dinh nham terminal cua broker khac).
+    symbol_suffix : str | None — hau to symbol ep buoc, vd "m" hoac "".
+        None/"auto" (mac dinh) thi suy ra tu ten server: server Trial
+        -> 'm', server Real/khac -> khong hau to. Ten chuan (self.symbol)
+        luon giu nguyen; ten tren broker nam o self.symbol_map /
+        broker_symbol().
     """
 
     def __init__(self, symbol, login=None, password=None, server=None,
-                 timeframe=DEFAULT_TIMEFRAME, mt5_module=None, path=None):
+                 timeframe=DEFAULT_TIMEFRAME, mt5_module=None, path=None,
+                 symbol_suffix=None):
         if not symbol:
             raise ValueError("MT5Feed can 1 symbol, vd 'EURUSD'")
         self.symbol = symbol
         self.login = login
         self.server = server
+        self.symbol_suffix = symbol_suffix
         self.timeframe = timeframe
         self.mt5 = load_mt5(mt5_module)
         password = password or os.environ.get("MT5_PASSWORD")
@@ -320,21 +387,70 @@ class MT5Feed(DataFeed):
                     "Dang nhap MT5 demo that bai (sai login / mat khau / "
                     f"server {server!r}). Loi MT5: {self.mt5.last_error()}"
                 )
-        info = self.mt5.symbol_info(symbol)
-        if info is None:
+        # Server thuc te dang dang nhap (de suy hau to symbol 'm' tren
+        # Trial): doc tu account_info(), roi xuong server truyen vao
+        # neu khong doc duoc.
+        effective_server = server
+        try:
+            _acct = (self.mt5.account_info()
+                     if hasattr(self.mt5, "account_info") else None)
+        except Exception:  # noqa: BLE001 — roi xuong server truyen vao
+            _acct = None
+        if _acct is not None:
+            _acct_server = getattr(_acct, "server", None)
+            if _acct_server:
+                effective_server = _acct_server
+        self.server = effective_server
+        # Ten tren broker (vd EURUSDm tren Trial): thu ten co hau to
+        # truoc, roi xuong ten chuan neu broker khong co ten do.
+        self.symbol_map = build_symbol_map(
+            self.mt5, [symbol], effective_server, symbol_suffix)
+        broker_symbol = self.symbol_map.get(symbol)
+        if broker_symbol is None:
+            tried = resolve_mt5_symbol(symbol, effective_server,
+                                       symbol_suffix)
+            tried_txt = (f"{tried!r} va {symbol!r}" if tried != symbol
+                         else f"{tried!r}")
             raise ValueError(
                 f"Symbol {symbol!r} khong co tren server MT5 demo dang noi "
-                f"(server={server!r}). Kiem tra lai ten symbol tren MT5 "
-                "terminal, hoac doi symbol cho desk nay."
+                f"(da thu {tried_txt}, "
+                f"server={effective_server!r}). Kiem tra lai ten symbol "
+                "tren MT5 terminal, hoac doi symbol cho desk nay."
             )
-        if not self.mt5.symbol_select(symbol, True):
-            raise ConnectionError(f"Khong chon duoc symbol {symbol!r} tren MT5.")
+        info = self.mt5.symbol_info(broker_symbol)
+        if info is None:
+            tried_txt = (f"{broker_symbol!r} va {symbol!r}"
+                         if broker_symbol != symbol
+                         else f"{broker_symbol!r}")
+            raise ValueError(
+                f"Symbol {symbol!r} khong co tren server MT5 demo dang noi "
+                f"(da thu {tried_txt}, "
+                f"server={effective_server!r}). Kiem tra lai ten symbol "
+                "tren MT5 terminal, hoac doi symbol cho desk nay."
+            )
+        if not self.mt5.symbol_select(broker_symbol, True):
+            raise ConnectionError(
+                f"Khong chon duoc symbol {broker_symbol!r} tren MT5.")
+
+    def broker_symbol(self, canonical):
+        """Ten tren broker cua 1 symbol chuan (vd 'EURUSD' -> 'EURUSDm'
+        tren server Trial). Giai quyet + cache theo nhu cau cho cac
+        symbol khac symbol cua feed; tra None neu broker khong co
+        ca ten co hau to lan ten chuan. self.symbol van giu ten chuan.
+        """
+        if canonical in self.symbol_map:
+            return self.symbol_map[canonical]
+        mapped = build_symbol_map(self.mt5, [canonical], self.server,
+                                  self.symbol_suffix).get(canonical)
+        self.symbol_map[canonical] = mapped
+        return mapped
 
     def bars(self, n: int = 60):
         """n bar gan nhat, dinh dang OHLC: [{'time': int, 'open': float,
         'high': float, 'low': float, 'close': float}]."""
         tf = _timeframe_const(self.mt5, self.timeframe)
-        rates = self.mt5.copy_rates_from_pos(self.symbol, tf, 0, n)
+        broker = self.broker_symbol(self.symbol) or self.symbol
+        rates = self.mt5.copy_rates_from_pos(broker, tf, 0, n)
         if rates is None or len(rates) == 0:
             raise ConnectionError(
                 f"MT5 khong tra ve bar nao cho {self.symbol!r} "
@@ -361,7 +477,8 @@ class MT5Feed(DataFeed):
             end = end.replace(tzinfo=_tz.utc)
         if end <= start:
             raise ValueError("bars_range: end phai sau start")
-        rates = self.mt5.copy_rates_range(self.symbol, tf, start, end)
+        broker = self.broker_symbol(self.symbol) or self.symbol
+        rates = self.mt5.copy_rates_range(broker, tf, start, end)
         if rates is None:
             raise ConnectionError(
                 f"MT5 khong tra ve bar nao cho {self.symbol!r} "
@@ -388,7 +505,8 @@ class MT5Feed(DataFeed):
     def latest_price(self, symbol=None):
         """Gia moi nhat (bid) cua symbol; mac dinh la symbol cua feed."""
         symbol = symbol or self.symbol
-        tick = self.mt5.symbol_info_tick(symbol)
+        broker = self.broker_symbol(symbol) or symbol
+        tick = self.mt5.symbol_info_tick(broker)
         if tick is None:
             raise ConnectionError(
                 f"MT5 khong tra ve tick cho {symbol!r}. "

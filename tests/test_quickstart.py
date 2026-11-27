@@ -306,3 +306,317 @@ def test_run_test_suite_returns_code(monkeypatch):
 
     monkeypatch.setattr(qs.subprocess, "run", fake_run_fail)
     assert qs._run_test_suite() == 1
+
+# --- mt5.symbol_suffix: map symbol chuan -> ten broker (Trial *m) --------
+# Cac fake nay cai dat DUNG hop dong cua mt5_feed (resolve_mt5_symbol /
+# build_symbol_map) de test phan noi cua quickstart, khong phu thuoc
+# vao viec ham that da co trong mt5_feed hay chua.
+from types import SimpleNamespace
+
+import yaml
+
+
+def _fake_resolve_mt5_symbol(symbol, server, suffix=None):
+    if suffix is not None:
+        return symbol + suffix
+    if "trial" in (server or "").lower():
+        return symbol + "m"
+    return symbol
+
+
+def _fake_build_symbol_map(mt5, symbols, server, suffix=None):
+    out = {}
+    for sym in symbols:
+        out[sym] = None
+        for cand in (_fake_resolve_mt5_symbol(sym, server, suffix), sym):
+            if mt5.symbol_info(cand) is not None:
+                out[sym] = cand
+                break
+    return out
+
+
+class _FakeMT5Symbols:
+    """Fake MT5 chi biet symbol_info (True neu ten co trong tap hop)."""
+
+    def __init__(self, available):
+        self.available = set(available)
+
+    def symbol_info(self, name):
+        return SimpleNamespace(name=name) if name in self.available else None
+
+
+def _install_fake_symbol_map(monkeypatch):
+    from diamondx10.data import mt5_feed
+    monkeypatch.setattr(mt5_feed, "resolve_mt5_symbol",
+                        _fake_resolve_mt5_symbol, raising=False)
+    monkeypatch.setattr(mt5_feed, "build_symbol_map",
+                        _fake_build_symbol_map, raising=False)
+
+
+_CFG_SYMBOLS = {"data": {"symbols": {
+    "forex": ["EURUSD"],
+    "xauusd": ["XAUUSD"],
+    "crypto": ["BTCUSD"],
+    "us_securities": ["NVDA"],
+}}}
+_ALL_M = ["EURUSDm", "XAUUSDm", "BTCUSDm", "NVDAm"]
+_ALL_CANON = ["EURUSD", "XAUUSD", "BTCUSD", "NVDA"]
+
+
+@pytest.mark.parametrize("cfg, expected", [
+    ({}, None),
+    ({"mt5": {}}, None),
+    ({"mt5": {"symbol_suffix": "auto"}}, None),
+    ({"mt5": {"symbol_suffix": "AUTO"}}, None),
+    ({"mt5": {"symbol_suffix": None}}, None),
+    ({"mt5": {"symbol_suffix": "m"}}, "m"),
+    ({"mt5": {"symbol_suffix": ""}}, ""),
+])
+def test_mt5_symbol_suffix(cfg, expected):
+    assert qs._mt5_symbol_suffix(cfg) == expected
+
+
+def test_check_demo_symbols_trial_only_m(monkeypatch, capsys):
+    _install_fake_symbol_map(monkeypatch)
+    feed = SimpleNamespace(mt5=_FakeMT5Symbols(_ALL_M))
+    mapping, missing = qs.check_demo_symbols(
+        feed, _CFG_SYMBOLS, "Exness-MT5Trial7", None)
+    assert missing == []
+    assert mapping == {"EURUSD": "EURUSDm", "XAUUSD": "XAUUSDm",
+                       "BTCUSD": "BTCUSDm", "NVDA": "NVDAm"}
+    out = capsys.readouterr().out
+    assert "[co] EURUSD -> EURUSDm (desk forex)" in out
+    assert "[co] XAUUSD -> XAUUSDm (desk xauusd)" in out
+    assert "[co] BTCUSD -> BTCUSDm (desk crypto)" in out
+    assert "[co] NVDA -> NVDAm (desk us_securities)" in out
+
+
+def test_check_demo_symbols_real_no_suffix(monkeypatch, capsys):
+    _install_fake_symbol_map(monkeypatch)
+    feed = SimpleNamespace(mt5=_FakeMT5Symbols(_ALL_CANON))
+    mapping, missing = qs.check_demo_symbols(
+        feed, _CFG_SYMBOLS, "Exness-MT5Real", None)
+    assert missing == []
+    assert mapping["EURUSD"] == "EURUSD"
+    out = capsys.readouterr().out
+    assert "[co] EURUSD -> EURUSD (desk forex)" in out
+    assert "EURUSDm" not in out
+
+
+def test_check_demo_symbols_explicit_suffix_overrides_server(
+        monkeypatch, capsys):
+    _install_fake_symbol_map(monkeypatch)
+    feed = SimpleNamespace(mt5=_FakeMT5Symbols(_ALL_M))
+    mapping, missing = qs.check_demo_symbols(
+        feed, _CFG_SYMBOLS, "Exness-MT5Real", "m")
+    assert missing == []
+    assert mapping["EURUSD"] == "EURUSDm"
+    out = capsys.readouterr().out
+    assert "[co] EURUSD -> EURUSDm (desk forex)" in out
+
+
+def test_check_demo_symbols_missing_names_both_tried(monkeypatch, capsys):
+    _install_fake_symbol_map(monkeypatch)
+    feed = SimpleNamespace(mt5=_FakeMT5Symbols([]))
+    mapping, missing = qs.check_demo_symbols(
+        feed, _CFG_SYMBOLS, "Exness-MT5Trial7", None)
+    assert mapping["EURUSD"] is None
+    assert "EURUSD" in missing
+    out = capsys.readouterr().out
+    assert "[THIEU] EURUSD (desk forex)" in out
+    # Loi phai neu ca 2 ten da thu + ten server.
+    assert "EURUSDm" in out and "EURUSD" in out
+    assert "Exness-MT5Trial7" in out
+
+
+def test_write_config_preserves_symbol_suffix(tmp_path, monkeypatch):
+    shutil.copy(REPO_ROOT / "config.example.yaml",
+                tmp_path / "config.example.yaml")
+    monkeypatch.setattr(qs, "ROOT", tmp_path)
+    qs._write_config("Exness-MT5Trial6", 123456789)
+    text = (tmp_path / "config.yaml").read_text(encoding="utf-8")
+    assert 'symbol_suffix: "auto"' in text
+    # Danh sach symbol chuan khong doi.
+    assert 'forex: ["EURUSD"]' in text
+    assert 'crypto: ["BTCUSD", "BNBUSD", "ETHUSD"]' in text
+
+
+# --- main() buoc 5: Trial chi co *m -> pass, truyen symbol_suffix -------
+class _FakeMT5FeedTrial:
+    """MT5Feed gia: chi co symbol *m, tai khoan DEMO, ghi lai kwargs."""
+
+    seen = []
+
+    def __init__(self, symbol, login=None, password=None, server=None,
+                 timeframe="M15", mt5_module=None, path=None,
+                 symbol_suffix=None):
+        self.symbol = symbol
+        self.login = login
+        self.server = server
+        self.symbol_suffix = symbol_suffix
+        self.mt5 = _FakeMT5Symbols(
+            ["EURUSDm", "XAUUSDm", "BTCUSDm", "BNBUSDm", "ETHUSDm",
+             "AMDm", "CDNSm", "SNPSm", "INTCm", "NVDAm"])
+        type(self).seen.append(self)
+
+    def account_info(self):
+        return SimpleNamespace(login=987654321, server="Exness-MT5Trial7",
+                               balance=10000.0, trade_mode=0)
+
+    def close(self):
+        pass
+
+
+def test_main_step5_trial_only_m_symbols_pass(monkeypatch, tmp_path, capsys):
+    _install_fake_symbol_map(monkeypatch)
+    from diamondx10.data import mt5_feed
+    import diamondx10.config as config_mod
+
+    shutil.copy(REPO_ROOT / "config.example.yaml",
+                tmp_path / "config.example.yaml")
+    monkeypatch.setattr(qs, "ROOT", tmp_path)
+    monkeypatch.setattr(qs, "_pip_install", lambda *a, **k: True)
+    monkeypatch.setattr(qs, "_ensure_pip", lambda: None)
+    monkeypatch.setattr(qs, "check_terminal",
+                        lambda mt5_module=None, path=None: (True, "ok"))
+    monkeypatch.setattr(qs, "resolve_mt5_terminal_path",
+                        lambda cfg=None: None)
+    monkeypatch.setattr(qs, "_run_cli", lambda argv: 0)
+
+    def fake_ask(prompt, default=None):
+        if "Server" in prompt:
+            return "Exness-MT5Trial7"
+        if "login" in prompt.lower():
+            return "987654321"
+        return ""
+
+    monkeypatch.setattr(qs, "_ask", fake_ask)
+    monkeypatch.setattr(qs, "_ask_password", lambda *a, **k: "mat-khau-gia")
+    monkeypatch.setattr(qs, "_ask_secret", lambda *a, **k: "")
+    monkeypatch.setattr(mt5_feed, "MT5Feed", _FakeMT5FeedTrial)
+
+    def fake_load_config(path=None):
+        cfg_path = Path(path) if path is not None else tmp_path / "config.yaml"
+        if not cfg_path.exists():
+            return {}
+        return yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+
+    monkeypatch.setattr(config_mod, "load_config", fake_load_config)
+    _FakeMT5FeedTrial.seen.clear()
+    old_pw = qs.os.environ.get("MT5_PASSWORD")
+    try:
+        rc = qs.main(["--skip-install", "--skip-tests"])
+    finally:
+        if old_pw is None:
+            qs.os.environ.pop("MT5_PASSWORD", None)
+        else:
+            qs.os.environ["MT5_PASSWORD"] = old_pw
+    out = capsys.readouterr().out
+    assert rc == 0
+    # Buoc 5 pass tren Trial chi co *m, in dung mapping tim duoc.
+    assert "[co] EURUSD -> EURUSDm (desk forex)" in out
+    assert "[co] XAUUSD -> XAUUSDm (desk xauusd)" in out
+    assert "[co] BTCUSD -> BTCUSDm (desk crypto)" in out
+    # MT5Feed nhan symbol_suffix None (auto) tu config.
+    assert _FakeMT5FeedTrial.seen, "buoc 5 chua tao MT5Feed"
+    assert _FakeMT5FeedTrial.seen[0].symbol_suffix is None
+    # Config local ghi ra giu symbol_suffix mac dinh.
+    text = (tmp_path / "config.yaml").read_text(encoding="utf-8")
+    assert 'symbol_suffix: "auto"' in text
+
+# --- Tich hop API THAT cua mt5_feed (khong fake map) -----------------------
+def test_check_demo_symbols_real_api_trial(capsys):
+    """Dung build_symbol_map THAT: Trial chi co *m -> map dung."""
+    feed = SimpleNamespace(mt5=_FakeMT5Symbols(_ALL_M))
+    mapping, missing = qs.check_demo_symbols(
+        feed, _CFG_SYMBOLS, "Exness-MT5Trial7", None)
+    assert missing == []
+    assert mapping["EURUSD"] == "EURUSDm"
+    out = capsys.readouterr().out
+    assert "[co] EURUSD -> EURUSDm (desk forex)" in out
+
+
+class _FakeMT5TerminalTrial:
+    """Terminal MT5 gia: server Trial, chi co symbol *m, tai khoan DEMO."""
+
+    AVAILABLE = {"EURUSDm", "XAUUSDm", "BTCUSDm", "BNBUSDm", "ETHUSDm",
+                 "AMDm", "CDNSm", "SNPSm", "INTCm", "NVDAm"}
+
+    def initialize(self, path=None):
+        return True
+
+    def login(self, login, password=None, server=None):
+        return True
+
+    def account_info(self):
+        return SimpleNamespace(login=987654321, server="Exness-MT5Trial7",
+                               balance=10000.0, trade_mode=0)
+
+    def symbol_info(self, name):
+        return SimpleNamespace(name=name) if name in self.AVAILABLE else None
+
+    def symbol_select(self, name, enable):
+        return name in self.AVAILABLE
+
+    def last_error(self):
+        return (0, "ok")
+
+    def shutdown(self):
+        return True
+
+
+def test_main_step5_real_mt5feed_trial_only_m(monkeypatch, tmp_path, capsys):
+    """Buoc 5 qua MT5Feed THAT + build_symbol_map THAT.
+
+    Terminal gia chi co *m; MT5Feed that phai tu doi EURUSD -> EURUSDm
+    (symbol_suffix=None = auto theo server Trial) neu khong buoc 5
+    da loi ValueError o symbol chuan.
+    """
+    from diamondx10.data import mt5_feed
+    import diamondx10.config as config_mod
+
+    shutil.copy(REPO_ROOT / "config.example.yaml",
+                tmp_path / "config.example.yaml")
+    monkeypatch.setattr(qs, "ROOT", tmp_path)
+    monkeypatch.setattr(qs, "_pip_install", lambda *a, **k: True)
+    monkeypatch.setattr(qs, "_ensure_pip", lambda: None)
+    monkeypatch.setattr(qs, "check_terminal",
+                        lambda mt5_module=None, path=None: (True, "ok"))
+    monkeypatch.setattr(qs, "resolve_mt5_terminal_path",
+                        lambda cfg=None: None)
+    monkeypatch.setattr(qs, "_run_cli", lambda argv: 0)
+
+    def fake_ask(prompt, default=None):
+        if "Server" in prompt:
+            return "Exness-MT5Trial7"
+        if "login" in prompt.lower():
+            return "987654321"
+        return ""
+
+    monkeypatch.setattr(qs, "_ask", fake_ask)
+    monkeypatch.setattr(qs, "_ask_password", lambda *a, **k: "mat-khau-gia")
+    monkeypatch.setattr(qs, "_ask_secret", lambda *a, **k: "")
+    monkeypatch.setattr(mt5_feed, "load_mt5",
+                        lambda mt5_module=None: _FakeMT5TerminalTrial())
+
+    def fake_load_config(path=None):
+        cfg_path = Path(path) if path is not None else tmp_path / "config.yaml"
+        if not cfg_path.exists():
+            return {}
+        return yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+
+    monkeypatch.setattr(config_mod, "load_config", fake_load_config)
+    old_pw = qs.os.environ.get("MT5_PASSWORD")
+    try:
+        rc = qs.main(["--skip-install", "--skip-tests"])
+    finally:
+        if old_pw is None:
+            qs.os.environ.pop("MT5_PASSWORD", None)
+        else:
+            qs.os.environ["MT5_PASSWORD"] = old_pw
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "[co] EURUSD -> EURUSDm (desk forex)" in out
+    assert "[co] XAUUSD -> XAUUSDm (desk xauusd)" in out
+    assert "[co] BTCUSD -> BTCUSDm (desk crypto)" in out
+    assert "[co] NVDA -> NVDAm (desk us_securities)" in out

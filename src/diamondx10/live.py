@@ -266,6 +266,18 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
                 "reason": f"khong tinh duoc tin hieu/gia: {exc}"}
     print(f"Gia moi nhat {symbol}: {entry}")
     print(f"Tin hieu: {sig}")
+    # Ten tren broker (vd 'EURUSDm' tren server Trial): feed MT5Feed
+    # giai quyet qua broker_symbol(); feed gia khong co ham do thi
+    # dung ten chuan. Ten noi bo / log van giu ten chuan.
+    broker_symbol = symbol
+    _broker_fn = getattr(feed, "broker_symbol", None)
+    if callable(_broker_fn):
+        try:
+            _resolved = _broker_fn(symbol)
+        except Exception:  # noqa: BLE001 — roi xuong ten chuan
+            _resolved = None
+        if _resolved:
+            broker_symbol = _resolved
     if sig.get("levels"):
         lv = sig["levels"]
         print(f"Levels: entry={lv['entry']:.4f} SL={lv['sl']:.4f} "
@@ -384,7 +396,8 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
         # kiem tra o day de khuyen nghi khong dua ra lenh khong dat
         # duoc; thieu ky quy thi BLOCKED-MARGIN nhu duong dat lenh.
         margin_ok, margin_msg = check_margin(mt5, symbol, vol, entry,
-                                             account)
+                                             account,
+                                             broker_symbol=broker_symbol)
         if not margin_ok:
             reason = (f"Khong du ky quy de dat lenh demo {symbol} "
                       f"{sig['action']} {vol} lot @ {entry}: {margin_msg}")
@@ -418,7 +431,8 @@ def process_symbol(cfg, desk, symbol, *, feed, mt5, account, server,
         result = place_demo_order(
             mt5, symbol=symbol, action=sig["action"], volume=vol,
             price=entry, sl=sl, tp=tp, desk=desk, manager=manager,
-            cfg=cfg, account_info=account, server=server)
+            cfg=cfg, account_info=account, server=server,
+            broker_symbol=broker_symbol)
     except RuntimeError as exc:
         if "ky quy" in str(exc):
             log_decision(symbol, "BLOCKED-MARGIN", str(exc),
