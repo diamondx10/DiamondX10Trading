@@ -16,11 +16,18 @@ Cai phu thuoc web UI 1 lan (them vao `requirements.txt`):
 pip install -r requirements.txt
 ```
 
-Chay server:
+Chay server (mo 1 cua so terminal trong thu muc repo):
 
 ```
+set PYTHONPATH=src
 python -m diamondx10.webapi [--port 8000] [--host 127.0.0.1]
 ```
+
+(PowerShell: `$env:PYTHONPATH = "src"` thay cho dong `set`.)
+`PYTHONPATH=src` la bat buoc — khong co no se loi `No module named
+'diamondx10'` (repo dung bo cuc src/, chua co goi cai dat).
+Nhanh hon: nhap doi **`start-webui.bat`** (tu set PYTHONPATH roi
+chay server).
 
 Mo trinh duyet: http://127.0.0.1:8000
 

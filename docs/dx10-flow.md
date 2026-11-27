@@ -13,8 +13,13 @@ thi ghi ro o duoi.
 3. Chay vong live che do de xuat + trinh nghe Telegram (2 cua so):
    ```
    python quickstart.py --live --recommend-only
+   set PYTHONPATH=src
    python -m diamondx10 telegram-listen
    ```
+   (`quickstart.py` tu them src/ vao duong dan nen khong can
+   PYTHONPATH; moi lenh `python -m diamondx10 ...` chay truc tiep
+   deu can `set PYTHONPATH=src` truoc — PowerShell:
+   `$env:PYTHONPATH = "src"`.)
    Muon 24/7 that thi may phai luon bat; dung Task Scheduler de tu
    chay lai khi khoi dong may (xem cong thuc trong `docs/mt5-demo.md`).
 
