@@ -132,6 +132,119 @@ duoc, co dau cung duoc — tool khong kiem tra chinh ta o do.
 thi gop theo desk (giu ban moi nhat moi desk) vao
 `decisions/fundamental-verdicts.json` (file runtime, da gitignore).
 
+### 2d. Nhan dinh tac dong tung tin (per-item impact verdict)
+
+Ngoai nhan dinh chung cua desk, Muse danh gia them TUNG TIN trong
+briefing: tin do tac dong the nao den 1 symbol cu the. Moi tin trong
+briefing deu co id rieng (`news_id`, MD5 cua title+link — cung id
+voi the tin tren feed tin), in kem tung tin o muc tin tuc cua file
+`.md` (dong `news_id: <id>`) va trong file `.json` (truong `"id"`
+cua moi tin). Muse nhac lai id do trong verdict:
+
+```json
+{
+  "desk": "forex",
+  "analyst": "Yuling Pan",
+  "direction": "buy",
+  "confidence": 0.8,
+  "drivers": ["Fed cat lai suat, USD yeu di"],
+  "risks": ["ECB co the cung ran lai"],
+  "note": "Dong thuan voi PTKT: xu huong tang, RSI 59",
+  "created_utc": "2026-11-27T09:00:00+00:00",
+  "news_impacts": [
+    {
+      "news_id": "9f2c...a1",
+      "impact": "positive",
+      "direction": "buy",
+      "confidence": 0.7,
+      "summary": "Fed dovish day EUR len.",
+      "affected_symbol": "EURUSD",
+      "verdict_created_utc": "2026-11-27T09:00:00+00:00"
+    }
+  ]
+}
+```
+
+- `"news_impacts"` la truong TUY CHON (vang mat -> `[]`); moi muc:
+  `news_id` (chuoi khong rong, id tin trong briefing), `impact`
+  (`"positive"` | `"negative"` | `"neutral"`), `direction`
+  (`"buy"` | `"sell"` | `"neutral"`), `confidence` (so 0..1),
+  `summary` (chuoi, duoc rong), `affected_symbol` (chuoi hoac
+  `null`), `verdict_created_utc` (ISO, tuy chon — vang mat thi lay
+  `created_utc` cua verdict).
+- Kiem tra chat nhu verdict desk: muc nao sai (direction la,
+  confidence ngoai 0..1, thieu `news_id`, sai kieu) thi CA verdict
+  bi loai, exit 1, khong luu gi. `news_id` la van CHAP NHAN (verdict
+  co the nhac tin chua co tren feed).
+- Luu verdict (`verdict --file`, hoac `muse-auto` doi duoc verdict)
+  thi nhan dinh tung tin duoc gan len the tin tuong ung trong kho
+  `decisions/news-cards.json` (`newsfeed.py` `NewsCardStore`,
+  `attach_impacts`) — CHI hien thi tren feed tin, KHONG gui
+  Telegram o buoc nay. `save_verdict` khong co side effect nao
+  (chi luu verdict); gan the nam o lenh `verdict` / chu ky
+  `muse-auto` / `muse-send`.
+
+Feed tin (`src/diamondx10/newsfeed.py`, kho
+`decisions/news-cards.json` — file runtime, da gitignore): moi the
+tin la 1 bai bao da lay ve (`briefing` va lenh `news` dang the khi
+lay tin, dedupe theo id — 1 bai chi co 1 the, desk dau tien thang):
+
+```json
+{
+  "id": "9f2c...a1",
+  "title": "Federal Reserve holds rates steady",
+  "link": "https://example.com/fed-1",
+  "source": "Fake Forex",
+  "summary": "ECB and Fed signal no change...",
+  "tier": 2,
+  "desk": "forex",
+  "analyst": "Yuling Pan",
+  "published_utc": "2026-11-27T09:00:00+00:00",
+  "created_utc": "2026-11-27T10:00:00+00:00",
+  "impact": null
+}
+```
+
+`impact` la `null` khi tin moi lay ve ("dang cho phan tich"), sau
+gan verdict thi co dang `{impact, direction, confidence, summary,
+affected_symbol, verdict_created_utc}` nhu tren. Kho the hong /
+chua co thi doc nhu kho rong, khong bao gio crash.
+
+Chuan kich hoat Telegram cho 1 tin (da chot — `news_qualifies`):
+tin duoc dua vao khuyen nghi Telegram khi va chi khi verdict tac
+dong cua no la **buy/sell voi do tin cay >= 0.6**, tin thuoc
+**tier 1 hoac 2**, VA **tong hop Yuling dong thuan** (PTKT BUY voi
+buy, SELL voi sell — rule 40: PTCB mot minh khong tao lenh). Tin
+**tier 3 (ro ri) KHONG BAO GIO** kich hoat Telegram mot minh, du
+tin cay co cao den dau. Telegram CHI gui qua duong dang bai hien
+co (`synthesize --publish`, xem muc 3) — khong co them lenh gui
+Telegram nao cho tin: bai BUY/SELL du chuan thi kem tom tat tac
+dong vao drivers + tom tat va ghi `"news_id"` len bai, roi tom tat
+bai gui qua Telegram nhu thuong; tin khong du chuan thi impact cua
+no chi hien tren the tin.
+
+Chu ky `muse-auto` mang impact di suot: `briefing` dang the tin
+-> gui Muse -> doi verdict (`wait_for_verdict` validate + luu,
+gom ca `news_impacts`) -> gan impact len the tin -> `synthesize
+--publish` moi xet kich hoat Telegram.
+
+### Che do TEST (`news.test_mode`)
+
+De kiem tra duong tin -> khuyen nghi ma khong can doi tin dat
+chuan 0.6, Phu bat che do TEST: co `news.test_mode: true` trong
+`config.yaml` (mac dinh `false`, xem `config.example.yaml`), hoac
+bat tam 1 lan bang co `synthesize --publish --test-mode` (chi co
+tac dung cho lan chay do, khong ghi vao config). O che do test,
+MOI impact buy/sell deu du chuan (`news_qualifies(..., test_mode=True)`
+bo qua nguong 0.6, dong thuan tong hop va loai tier — ke ca tier 3);
+direction neutral thi KHONG BAO GIO du (khong co khuyen nghi de
+gui), bai NEUTRAL cung khong gui Telegram. Phan tich tac dong van
+la verdict THAT cua Muse — che do test chi bo cua kich hoat, khong
+tao phan tich gia. Moi bai test deu danh dau ro de khong nham voi
+khuyen nghi that: truong `"test_mode": true` tren bai dang (hien
+qua `GET /api/posts` de web UI gan nhan [TEST]) va tien to
+`"[TEST] "` o dau chinh tin Telegram gui di.
+
 ## 3. Tong hop Yuling — PTKT + PTCB
 
 ```bash
@@ -194,7 +307,10 @@ Voi `--publish`, moi symbol cua desk duoc dang them 1 bai
   Telegram (`telegram.py` `format_post_summary`, chi khi
   `telegram.enabled: true`); bai NEUTRAL khong gui. Tin chi la
   thong tin — khong nut dat lenh, khong tao lenh cho. Gui loi chi
-  in canh bao, khong lam hong viec dang bai.
+  in canh bao, khong lam hong viec dang bai. Bai BUY/SELL co tin
+  du chuan kich hoat (muc 2d) thi kem tom tat tac dong cua tin do
+  vao drivers + tom tat va ghi `"news_id"` len bai — cung 1 tin
+  Telegram do, khong gui them tin nao cho tin do.
 - **Dedupe:** cung symbol + cung ket luan + cung
   `verdict_created_utc` thi tra lai bai cu, khong tao bai moi,
   khong gui Telegram lai. Loi dang bai chi in canh bao, khong lam
@@ -272,6 +388,13 @@ python -m diamondx10 telegram-listen   # nhan nut "Dat lenh" tren Telegram
   `decisions/analysis-posts.json`), `publish_synthesis_post`,
   `cmd_publish_post` (lenh `publish-post`); dedupe bai tong hop,
   Telegram chi cho BUY/SELL.
+- `src/diamondx10/newsfeed.py` — `NewsCardStore` (kho the tin
+  `decisions/news-cards.json`), `news_qualifies`,
+  `impacts_for_symbol`; chuan kich hoat Telegram cho tin (muc 2d).
+- `tests/test_newsfeed.py`, `tests/test_verdict_impact.py` — the
+  tin (tao/dedupe/list/gan impact), chuan `news_qualifies`,
+  validate `news_impacts`, gan impact khi luu verdict / muse-auto,
+  kich hoat Telegram qua duong dang bai.
 - `src/diamondx10/telegram.py` — `format_post_summary` (tom tat bai
   dang, chi thong tin, khong nut dat lenh); `order_keyboard`,
   `get_updates`, `answer_callback_query`, `edit_message_text`

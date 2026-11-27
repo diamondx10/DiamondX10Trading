@@ -141,7 +141,8 @@ CLI ghi đè config: `--timeframe`, `--interval-min`, `--max-cycles`,
    thiếu chat_id) rồi mới gửi 1 tin thử. Gửi được thì chat nhận tin
    "DiamondX10 — Telegram test message."
 
-### Các loại cảnh báo (chỉ 3 trường hợp — tin tức KHÔNG gửi tự động)
+### Các loại cảnh báo (chỉ 3 trường hợp — tin tức chỉ kích hoạt qua
+đường đăng bài khi đủ chuẩn, xem mục dưới)
 
 | Khi nào | Nội dung |
 |---|---|
@@ -164,6 +165,35 @@ double-send.
 
 Tin chạy tay trước phiên (lệnh `news`, xem `docs/market-news.md`) —
 **vòng lặp không gửi tin tức tự động**, theo quyết định đã chốt.
+Ngoại lệ duy nhất là chuẩn tin đủ điều kiện ở mục dưới — và cũng
+chỉ gửi qua đường đăng bài hiện có, không phải đường gửi tin riêng.
+
+### Tin tức đủ chuẩn cũng kích hoạt khuyến nghị (quy tắc 58)
+
+Một tin tức **không bao giờ tự gửi Telegram một mình**. Nhưng khi
+một tin đủ chuẩn, khuyến nghị Telegram được gửi qua **đường đăng bài
+hiện có** (`synthesize --publish` / `POST /api/publish`, xem
+`docs/web-ui.md` §8, quy tắc 53–54) — tức là tin đó đi kèm bài đăng
+phân tích BUY/SELL của desk, và bài đăng đó gửi tóm tắt như mọi bài
+BUY/SELL khác. Chuẩn đã chốt 2026-11-27 (cả 3 điều kiện phải cùng
+đúng, kiểm tra bằng `newsfeed.news_qualifies`):
+
+1. Verdict tác động của Muse cho chính tin đó là **buy/sell** với
+   **độ tin cậy ≥ 0,6** (cùng ngưỡng `fa_high_confidence` của tổng
+   hợp Yuling).
+2. Tin thuộc **tier 1** (chính thống) hoặc **tier 2** (báo chí).
+3. **Tổng hợp Yuling của desk đồng thuận** — hướng tổng hợp trùng
+   với hướng verdict tác động (quy tắc 40: PTCB một mình không tạo
+   lệnh).
+
+Tin **tier 3** (rò rỉ, chưa xác minh) **KHÔNG BAO GIỜ kích hoạt
+Telegram một mình**, dù verdict tác động có mạnh đến đâu. Module
+thẻ tin (`src/diamondx10/newsfeed.py`) không gọi Telegram trực
+tiếp — nó chỉ lưu thẻ + gắn impact; việc gửi vẫn thuộc về đường
+đăng bài. Vòng tự động tải tin (`GET|POST /api/news-auto-fetch`,
+quy tắc 60) cũng **không bao giờ gửi Telegram** — nó chỉ lấy tin
++ đăng thẻ; impact và Telegram vẫn đi qua chu kỳ briefing/verdict
+và đường đăng bài hiện có.
 
 Ngôn ngữ Telegram theo lựa chọn của user (quy tắc 44, 51): tin nhắn,
 nút bấm và câu trả lời callback dùng ngôn ngữ trong `language:` của

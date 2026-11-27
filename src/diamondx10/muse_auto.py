@@ -37,6 +37,7 @@ from .muse_browser import (
     send_briefing,
     wait_for_verdict,
 )
+from .newsfeed import NewsCardStore
 
 FA_CYCLE_STATE = (Path(__file__).resolve().parents[2] / "decisions"
                   / "fa-cycle-state.json")
@@ -108,14 +109,16 @@ def _write_state(state, state_path=None):
 
 def run_muse_auto(cfg, desks, wait_min, headless=True, *, driver=None,
                   feed=None, news_fetcher=None, out_dir=None,
-                  state_path=None, poll_sec=None, send_timeout_sec=None):
+                  state_path=None, poll_sec=None, send_timeout_sec=None,
+                  news_card_store=None):
     """Chay 1 chu ky PTCB tu dong cho cac desk. Tra ma thoat (0/1).
 
     desks: list desk (vd ["forex"]). wait_min: so phut doi verdict
     toi da moi desk. headless: True = trinh duyet an (mac dinh cho
     chay dinh ky). driver/feed/news_fetcher/out_dir/state_path/
-    poll_sec/send_timeout_sec: diem tiem cho test (khong truyen thi
-    dung gia tri that / mac dinh).
+    poll_sec/send_timeout_sec/news_card_store: diem tiem cho test
+    (khong truyen thi dung gia tri that / mac dinh; news_card_store
+    mac dinh la kho decisions/news-cards.json).
     """
     started = datetime.now(timezone.utc)
     wait = int(wait_min)
@@ -192,6 +195,24 @@ def run_muse_auto(cfg, desks, wait_min, headless=True, *, driver=None,
                              "reason": reason}
             print(f"CANH BAO ({desk}): {reason}")
         else:
+            # wait_for_verdict da luu verdict; gan nhan dinh tac dong
+            # tung tin cua no len the tin — CHI hien thi tren feed
+            # tin, KHONG gui Telegram o day (Telegram chi qua duong
+            # dang bai `synthesize --publish`, xem posts.py). Gan the
+            # loi thi chi in canh bao, khong lam hong chu ky.
+            if verdict.get("news_impacts"):
+                try:
+                    store = (news_card_store
+                             if news_card_store is not None
+                             else NewsCardStore())
+                    matched = store.attach_impacts(
+                        verdict["news_impacts"], verdict["created_utc"])
+                    if matched:
+                        print(f"Da gan {matched} nhan dinh tac dong len "
+                              "the tin.")
+                except Exception as exc:  # noqa: BLE001 — gan the loi thi bao
+                    print(f"CANH BAO ({desk}): khong gan duoc nhan dinh "
+                          f"tac dong len the tin ({exc}).")
             reason = (f"verdict da luu — desk {verdict['desk']} — "
                       f"direction {verdict['direction']} "
                       f"(tin cay {verdict['confidence']:g})")
@@ -226,7 +247,7 @@ def run_muse_auto(cfg, desks, wait_min, headless=True, *, driver=None,
 def cmd_muse_auto(cfg, desk=None, all_desks=False, wait_min=None,
                   headless=True, *, driver=None, feed=None,
                   news_fetcher=None, out_dir=None, state_path=None,
-                  poll_sec=None):
+                  poll_sec=None, news_card_store=None):
     """Lenh CLI `muse-auto`: chu ky PTCB tu dong cho 1 desk hoac tat ca.
 
     Mac dinh chay tat ca 4 desk (khi khong truyen --desk), trinh duyet
@@ -241,4 +262,5 @@ def cmd_muse_auto(cfg, desk=None, all_desks=False, wait_min=None,
     return run_muse_auto(cfg, desks, wait, headless=headless,
                          driver=driver, feed=feed,
                          news_fetcher=news_fetcher, out_dir=out_dir,
-                         state_path=state_path, poll_sec=poll_sec)
+                         state_path=state_path, poll_sec=poll_sec,
+                         news_card_store=news_card_store)

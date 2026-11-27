@@ -7,10 +7,10 @@
 // POST /api/publish. If the endpoints are not implemented yet, the feed
 // shows an empty state and the composer reports the error — the rest of
 // the homepage keeps working.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  createPost, fetchPosts, fmtNum, publishPosts,
-  DESK_LABELS, DESKS, type Post,
+  createPost, fetchNewsCards, fetchPosts, fmtNum, publishPosts,
+  DESK_LABELS, DESKS, type NewsCard, type Post,
 } from '../api'
 import { useI18n, type I18nKey } from '../i18n'
 import { Empty, Loading } from './shared'
@@ -113,6 +113,9 @@ function PostCard({ post }: { post: Post }) {
         <span className={`badge ${ACTION_BADGE_CLASS[action]} post-badge`}>
           {t(ACTION_LABEL_KEY[action])}
         </span>
+        {post.test_mode ? (
+          <span className="badge post-badge" title={t('mgr.testModeHint')}>{t('feed.testBadge')}</span>
+        ) : null}
       </div>
 
       <div className="post-symbol">{post.symbol}</div>
@@ -172,6 +175,92 @@ function PostCard({ post }: { post: Post }) {
             <span>{t('feed.verdict')}: {relTime(post.verdict_created_utc)}</span>
           </>
         )}
+      </div>
+    </article>
+  )
+}
+
+// Trust-tier labels (shared with the News tab).
+const TIER_KEYS: Record<number, I18nKey> = {
+  1: 'news.tier1',
+  2: 'news.tier2',
+  3: 'news.tier3',
+}
+
+// News card on the feed (rule 58): a followed news item rendered as a
+// feed card, newest first alongside analysis posts. Title links to the
+// source; the per-item Muse impact analysis reads like a comment
+// underneath, or an "awaiting analysis" state while impact is null.
+function NewsCardView({ card }: { card: NewsCard }) {
+  const { t } = useI18n()
+  const relTime = useRelativeTime()
+  const analyst = card.analyst || DESK_ANALYSTS[card.desk] || card.desk
+  const color = DESK_COLORS[card.desk] ?? 'var(--accent)'
+  const impact = card.impact
+  const dir = (impact?.direction || '').toUpperCase()
+  const action: Action = dir === 'BUY' || dir === 'SELL' ? dir : 'NEUTRAL'
+  const tierKey = TIER_KEYS[card.tier]
+  const impactSummary = (impact?.summary || '').trim()
+
+  return (
+    <article className="card post-card">
+      <div className="post-head">
+        <span className="avatar" style={{ background: color }} aria-hidden="true">
+          {initials(analyst)}
+        </span>
+        <div className="post-head-text">
+          <div className="post-name">{analyst}</div>
+          <div className="post-meta">
+            {DESK_LABELS[card.desk] ?? card.desk} · {relTime(card.created_utc)}
+          </div>
+        </div>
+        <span className="badge post-badge">{t('newsCard.label')}</span>
+        {card.test_mode ? (
+          <span className="badge post-badge" title={t('mgr.testModeHint')}>{t('feed.testBadge')}</span>
+        ) : null}
+      </div>
+
+      <div className="post-symbol">
+        <a className="news-title-link" href={card.link} target="_blank" rel="noreferrer">
+          {card.title}
+        </a>
+      </div>
+      {card.summary ? <p className="post-summary">{card.summary}</p> : null}
+
+      <div className="news-impact">
+        <strong>{t('newsCard.impactTitle')}</strong>
+        {impact ? (
+          <>
+            <div>
+              <span className={`badge ${ACTION_BADGE_CLASS[action]}`}>
+                {t(ACTION_LABEL_KEY[action])}
+              </span>
+            </div>
+            {(impact.affected_symbol || impact.confidence !== null && impact.confidence !== undefined) && (
+              <div className="key-numbers">
+                {impact.affected_symbol && (
+                  <span className="key-num"><span className="k">{t('newsCard.affectedSymbol')}</span>{impact.affected_symbol}</span>
+                )}
+                {impact.confidence !== null && impact.confidence !== undefined && (
+                  <span className="key-num"><span className="k">{t('sig.thConfidence')}</span>{(impact.confidence * 100).toFixed(0)}%</span>
+                )}
+              </div>
+            )}
+            {impactSummary && <p className="post-summary" style={{ marginTop: 0 }}>{impactSummary}</p>}
+            {impact.verdict_created_utc && (
+              <div className="post-meta">{t('feed.verdict')}: {relTime(impact.verdict_created_utc)}</div>
+            )}
+          </>
+        ) : (
+          <span className="muted small">{t('newsCard.awaitingAnalysis')}</span>
+        )}
+      </div>
+
+      <div className="post-footer">
+        <span>{card.source}</span>
+        <span>·</span>
+        <span className="badge">Tier {card.tier}</span>
+        {tierKey && <span>{t(tierKey)}</span>}
       </div>
     </article>
   )
@@ -306,6 +395,7 @@ function Composer({ onPosted }: { onPosted: (post: Post) => void }) {
 export default function AnalysisFeed() {
   const { t } = useI18n()
   const [posts, setPosts] = useState<Post[]>([])
+  const [cards, setCards] = useState<NewsCard[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<string>('all')
@@ -314,13 +404,33 @@ export default function AnalysisFeed() {
 
   const load = useCallback(() => {
     setLoading(true); setError(null)
-    fetchPosts(20, filter === 'all' ? undefined : filter)
-      .then((r) => setPosts(r.posts ?? []))
+    const desk = filter === 'all' ? undefined : filter
+    // News cards failing must not hide the analysis posts (and vice
+    // versa): a failed /api/news-cards degrades to an empty card list.
+    Promise.all([
+      fetchPosts(20, desk),
+      fetchNewsCards(50, desk).catch(() => ({ cards: [] as NewsCard[] })),
+    ])
+      .then(([pr, nr]) => { setPosts(pr.posts ?? []); setCards(nr.cards ?? []) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false))
   }, [filter])
 
   useEffect(() => { load() }, [load])
+
+  // One timeline, newest first: analysis posts and news cards
+  // interleaved by created_utc (rule 58).
+  type FeedItem =
+    | { kind: 'post'; key: string; created: string; post: Post }
+    | { kind: 'news'; key: string; created: string; card: NewsCard }
+  const items: FeedItem[] = useMemo(() => {
+    const merged: FeedItem[] = [
+      ...posts.map((p): FeedItem => ({ kind: 'post', key: `post-${p.id}`, created: p.created_utc, post: p })),
+      ...cards.map((c): FeedItem => ({ kind: 'news', key: `news-${c.id}`, created: c.created_utc, card: c })),
+    ]
+    merged.sort((a, b) => Date.parse(b.created) - Date.parse(a.created))
+    return merged
+  }, [posts, cards])
 
   async function publishFromSynthesis() {
     setPublishing(true); setNotice(null)
@@ -365,6 +475,10 @@ export default function AnalysisFeed() {
 
       {notice && <div className="notice">{notice}</div>}
 
+      {!loading && !error && cards.length === 0 && (
+        <div className="notice">{t('feed.emptyNoNews')}</div>
+      )}
+
       {loading ? (
         <Loading />
       ) : error ? (
@@ -372,10 +486,12 @@ export default function AnalysisFeed() {
           <Empty text={t('feed.empty')} />
           <p className="muted small" style={{ textAlign: 'center' }}>{t('common.loadError')}: {error}</p>
         </div>
-      ) : posts.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="card"><Empty text={t('feed.empty')} /></div>
       ) : (
-        posts.map((p) => <PostCard key={p.id} post={p} />)
+        items.map((item) => item.kind === 'post'
+          ? <PostCard key={item.key} post={item.post} />
+          : <NewsCardView key={item.key} card={item.card} />)
       )}
     </section>
   )

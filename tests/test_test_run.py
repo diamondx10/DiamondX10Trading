@@ -83,6 +83,21 @@ def test_subprocess_env_includes_src(monkeypatch):
     assert env["PYTHONPATH"].startswith(str(tr.ROOT / "src"))
     assert "/mot/duong/dan" in env["PYTHONPATH"]
 
+
+def test_subprocess_env_unbuffered(monkeypatch):
+    # PYTHONUNBUFFERED=1 de log cua tien trinh con chay thang ra
+    # man hinh / log viewer trong luc dang chay (khong bi don den
+    # khi ket thuc vi block-buffer khi ghi ra pipe).
+    monkeypatch.delenv("PYTHONUNBUFFERED", raising=False)
+    assert tr._subprocess_env()["PYTHONUNBUFFERED"] == "1"
+    monkeypatch.setenv("PYTHONUNBUFFERED", "0")
+    assert tr._subprocess_env()["PYTHONUNBUFFERED"] == "1"
+    # PYTHONPATH van prepend src/ nhu cu.
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    env = tr._subprocess_env()
+    assert env["PYTHONPATH"].startswith(str(tr.ROOT / "src"))
+    assert env["PYTHONUNBUFFERED"] == "1"
+
 # --- mt5.symbol_suffix: map symbol chuan -> ten broker (Trial *m) --------
 # Cac fake nay cai dat DUNG hop dong cua mt5_feed (resolve_mt5_symbol /
 # build_symbol_map) de test phan noi cua test_run, khong phu thuoc vao

@@ -105,11 +105,15 @@ class DiagLogger:
 def _subprocess_env():
     """Env cho tien trinh con: them src/ vao PYTHONPATH de
     `python -m diamondx10` tim duoc package (khong phu thuoc vao
-    PYTHONPATH san cua may)."""
+    PYTHONPATH san cua may). Dat PYTHONUNBUFFERED=1 de stdout cua
+    tien trinh con khong bi block-buffer khi ghi ra pipe (~8KB) —
+    log chay thang ra man hinh / log viewer trong luc tien trinh con
+    van dang chay, thay vi don den khi ket thuc."""
     env = dict(os.environ)
     src = str(ROOT / "src")
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = src + (os.pathsep + existing if existing else "")
+    env["PYTHONUNBUFFERED"] = "1"
     return env
 
 

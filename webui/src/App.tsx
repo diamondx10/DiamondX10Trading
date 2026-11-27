@@ -85,7 +85,7 @@ function Shell({ auth, onSignedIn, onSignedOut }: { auth: AuthState; onSignedIn:
           </nav>
           <main>
             {tab === 'manager' && <Manager />}
-            {tab === 'overview' && <Overview onOpenNews={() => setTab('news')} />}
+            {tab === 'overview' && <Overview />}
             {tab === 'positions' && <Positions />}
             {tab === 'signals' && <Signals />}
             {tab === 'muse' && <MuseTab />}

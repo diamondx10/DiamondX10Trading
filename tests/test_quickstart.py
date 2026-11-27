@@ -340,6 +340,21 @@ def test_child_env_includes_src(monkeypatch):
     assert "/mot/duong/dan" in env["PYTHONPATH"]
 
 
+def test_child_env_unbuffered(monkeypatch):
+    # PYTHONUNBUFFERED=1 de log cua tien trinh con chay thang ra
+    # man hinh / log viewer trong luc dang chay (khong bi don den
+    # khi ket thuc vi block-buffer khi ghi ra pipe).
+    monkeypatch.delenv("PYTHONUNBUFFERED", raising=False)
+    assert qs._child_env()["PYTHONUNBUFFERED"] == "1"
+    monkeypatch.setenv("PYTHONUNBUFFERED", "0")
+    assert qs._child_env()["PYTHONUNBUFFERED"] == "1"
+    # PYTHONPATH van prepend src/ nhu cu.
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    env = qs._child_env()
+    assert env["PYTHONPATH"].startswith(str(qs.ROOT / "src"))
+    assert env["PYTHONUNBUFFERED"] == "1"
+
+
 def test_run_test_suite_returns_code(monkeypatch):
     seen = {}
 

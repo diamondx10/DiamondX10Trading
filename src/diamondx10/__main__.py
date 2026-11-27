@@ -31,7 +31,14 @@ from .backtest import (
 )
 from . import audit as audit_mod
 from .briefing import DESKS as BRIEFING_DESKS
-from .briefing import build_briefing, cmd_briefing
+from .briefing import (
+    DESK_ANALYSTS,
+    _article_dict,
+    _news_card,
+    build_briefing,
+    cmd_briefing,
+)
+from .newsfeed import NewsCardStore
 from . import killswitch
 from . import telegram as telegram_mod
 from .data.csv_import import import_csv_bars
@@ -149,6 +156,47 @@ def cmd_muse_setup():
     return 0
 
 
+def _cmd_news(cfg, desk=None, days=2, include_seen=False, *, fetcher=None,
+              news_card_store=None, store=None):
+    """Lenh CLI `news`: lay tin thi truong theo desk, in bao cao.
+
+    Tra 0 neu xong, 1 neu chua cau hinh nguon tin. Tin lay ve duoc
+    dang luon len feed tin (NewsCardStore.publish_cards; desk = desk
+    da chon, hoac desk dau tien trong desk_tags cua tin neu lay tat
+    ca desk; tin da co the roi thi dedupe bo qua). Dang the loi thi
+    chi in canh bao, khong lam hong bao cao. fetcher / store /
+    news_card_store: diem tiem cho test.
+    """
+    news_cfg = cfg.get("news") or {}
+    if not (news_cfg.get("sources") or []):
+        print("Chua cau hinh nguon tin (muc 'news' trong "
+              "config.yaml). Xem config.example.yaml va "
+              "docs/market-news.md.")
+        return 1
+    result = run_news(news_cfg, desk=desk, max_age_days=days,
+                      fetcher=fetcher, store=store,
+                      include_seen=include_seen)
+    print(format_news_report(result, desk=desk))
+    try:
+        store = (news_card_store if news_card_store is not None
+                 else NewsCardStore())
+        created_utc = datetime.now(timezone.utc).isoformat()
+        cards = []
+        for article in result.get("articles") or []:
+            art_desk = desk
+            if art_desk is None:
+                tags = list(getattr(article, "desk_tags", []) or [])
+                art_desk = tags[0] if tags else "forex"
+            analyst = DESK_ANALYSTS.get(art_desk, art_desk)
+            cards.append(_news_card(_article_dict(article), art_desk,
+                                    analyst, created_utc))
+        if cards:
+            store.publish_cards(cards)
+    except Exception as exc:  # noqa: BLE001 — dang the loi thi bao, khong hong bao cao
+        print(f"CANH BAO: khong dang duoc tin len feed tin ({exc}).")
+    return 0
+
+
 def cmd_muse_send(cfg, file, prompt=None, headless=None, wait_min=None,
                   no_wait=False, *, driver=None):
     """Gui briefing len chat Muse, mac dinh doi verdict roi luu.
@@ -185,6 +233,19 @@ def cmd_muse_send(cfg, file, prompt=None, headless=None, wait_min=None,
     if verdict is None:
         print("Chua luu duoc verdict — xem huong dan fallback tay o tren.")
         return 1
+    # wait_for_verdict da luu verdict; gan nhan dinh tac dong tung
+    # tin cua no len the tin (CHI hien thi tren feed tin, KHONG gui
+    # Telegram o day — Telegram chi qua duong dang bai
+    # `synthesize --publish`).
+    if verdict.get("news_impacts"):
+        try:
+            matched = NewsCardStore().attach_impacts(
+                verdict["news_impacts"], verdict["created_utc"])
+            if matched:
+                print(f"Da gan {matched} nhan dinh tac dong len the tin.")
+        except Exception as exc:  # noqa: BLE001 — gan the loi thi bao, khong hong verdict
+            print(f"CANH BAO: khong gan duoc nhan dinh tac dong len "
+                  f"the tin ({exc}).")
     print(f"OK: verdict da luu — desk {verdict['desk']} — "
           f"direction {verdict['direction']} "
           f"(tin cay {verdict['confidence']:g})")
@@ -778,6 +839,13 @@ def main(argv=None):
     sy.add_argument("--publish", action="store_true",
                     help="dang them 1 bai phan tich / symbol len feed "
                          "trang chu (BUY/SELL thi gui tom tat Telegram)")
+    sy.add_argument("--test-mode", action="store_true",
+                    help="che do TEST cho lan dang nay (chi co tac dung "
+                         "kem --publish): moi tin co verdict tac dong "
+                         "buy/sell deu duoc dang + gui khuyen nghi "
+                         "Telegram, bo qua nguong 0.6 / dong thuan tong "
+                         "hop / loai tier; bai danh dau [TEST]. Khong "
+                         "ghi vao config.")
     pp = sub.add_parser("publish-post",
                         help="dang 1 bai phan tich thu cong len feed "
                              "trang chu (BUY/SELL thi gui tom tat Telegram)")
@@ -938,15 +1006,8 @@ def main(argv=None):
             print(f"LOI: {exc}")
             return 1
     elif args.cmd == "news":
-        news_cfg = cfg.get("news") or {}
-        if not (news_cfg.get("sources") or []):
-            print("Chua cau hinh nguon tin (muc 'news' trong "
-                  "config.yaml). Xem config.example.yaml va "
-                  "docs/market-news.md.")
-            return 1
-        result = run_news(news_cfg, desk=args.desk,
-                          max_age_days=args.days, include_seen=args.all)
-        print(format_news_report(result, desk=args.desk))
+        return _cmd_news(cfg, desk=args.desk, days=args.days,
+                         include_seen=args.all)
     elif args.cmd == "signals":
         feed = SimulatedFeed(args.desk)
         print(generate_signals(args.desk, feed.bars(60)))
@@ -1122,7 +1183,8 @@ def main(argv=None):
         return cmd_verdict(cfg, args.file)
     elif args.cmd == "synthesize":
         return cmd_synthesize(cfg, args.desk, args.symbol,
-                              publish=args.publish)
+                              publish=args.publish,
+                              test_mode=True if args.test_mode else None)
     elif args.cmd == "publish-post":
         return cmd_publish_post(cfg, args.desk, args.symbol, args.action,
                                 args.summary, confidence=args.confidence,

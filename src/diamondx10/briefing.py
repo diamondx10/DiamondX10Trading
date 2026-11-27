@@ -31,6 +31,7 @@ from .data.news import NewsStore, run_news
 from .data.providers import build_feed
 from .i18n import get_language, t
 from .models.macro import macro_edge
+from .newsfeed import NewsCardStore
 from .signals import generate_signals
 
 DESKS = ["forex", "xauusd", "crypto", "us_securities"]
@@ -204,9 +205,15 @@ def _format_patterns(patterns, lang="vi"):
 
 
 def _article_dict(article):
-    """NewsArticle -> dict JSON-safe (ghi vao file .json)."""
+    """NewsArticle -> dict JSON-safe (ghi vao file .json).
+
+    "id" la MD5(title+link) tu article_hash() — cung id voi the tin
+    trong kho news-cards.json, de Muse nhac lai trong
+    verdict.news_impacts (truong "news_id").
+    """
     pub = getattr(article, "pub_date", None)
     return {
+        "id": article.article_hash(),
         "title": article.title,
         "link": article.link,
         "source": article.source,
@@ -216,6 +223,25 @@ def _article_dict(article):
         "is_urgent": bool(getattr(article, "is_urgent", False)),
         "pub_date": pub.isoformat() if pub is not None else None,
         "desks": list(getattr(article, "desk_tags", []) or []),
+    }
+
+
+def _news_card(article, desk, analyst, created_utc):
+    """Article (dict da qua _article_dict) -> the tin dung shape
+    chuan cua newsfeed (xem newsfeed.py). Tin moi thi impact=None
+    (cho phan tich xong — "dang cho phan tich")."""
+    return {
+        "id": article["id"],
+        "title": article["title"],
+        "link": article["link"],
+        "source": article["source"],
+        "summary": article.get("summary") or "",
+        "tier": int(article.get("trust_tier") or 2),
+        "desk": desk,
+        "analyst": analyst,
+        "published_utc": article.get("pub_date"),
+        "created_utc": created_utc,
+        "impact": None,
     }
 
 
@@ -248,7 +274,14 @@ def _build_macro(cfg, symbols):
 
 
 def _verdict_template(desk, analyst, generated):
-    """Mau verdict JSON ma analyst phai tra ve (gia tri vi du hop le)."""
+    """Mau verdict JSON ma analyst phai tra ve (gia tri vi du hop le).
+
+    "news_impacts": nhan dinh tac dong TUNG TIN trong briefing —
+    moi muc nhac 1 tin bang "news_id" (id in kem tung tin o muc tin
+    tuc ben tren) va cho biet tin do tac dong the nao den 1 symbol
+    cu the. Muse chi dien muc cho tin minh danh gia; bo trong [] neu
+    khong co tin nao dang ke.
+    """
     return {
         "desk": desk,
         "analyst": analyst,
@@ -258,6 +291,17 @@ def _verdict_template(desk, analyst, generated):
         "risks": [],
         "note": "",
         "created_utc": generated.isoformat(),
+        "news_impacts": [
+            {
+                "news_id": "<id cua tin trong muc tin tuc ben tren>",
+                "impact": "positive",
+                "direction": "buy",
+                "confidence": 0.8,
+                "summary": "Tin nay day gia len vi ...",
+                "affected_symbol": "<SYM cua desk, vd EURUSD>",
+                "verdict_created_utc": generated.isoformat(),
+            }
+        ],
     }
 
 
@@ -334,6 +378,8 @@ def _render_md(desk, analyst, symbols_data, news_grouped, news_errors,
             lines.append(
                 f"- [{tier_label}]{flag} {art['title']}")
             lines.append(f"  {art['source']} | {art['link']}")
+            # Id de Muse nhac lai trong verdict.news_impacts (news_id).
+            lines.append(f"  news_id: {art['id']}")
             if art.get("summary"):
                 lines.append(f"  {art['summary'][:200]}")
             if tier == 3:
@@ -369,11 +415,17 @@ def _render_md(desk, analyst, symbols_data, news_grouped, news_errors,
 # --- API chinh ---
 
 def build_briefing(cfg, desk, days=3, *, feed=None, news_fetcher=None,
-                   out_dir=None):
+                   out_dir=None, news_card_store=None):
     """Tao briefing cho 1 desk, ghi file .md + .json, tra dict tom tat.
 
     Tra {"desk", "analyst", "symbols" (list ten symbol), "generated_utc"
     (ISO), "md_path", "json_path" (str)}.
+
+    Tin lay ve duoc dang luon len feed tin (NewsCardStore.publish_cards,
+    1 lan / briefing, desk = desk nay, analyst = analyst desk nay;
+    tin da co the roi thi dedupe bo qua). Tao the loi thi chi in
+    canh bao, khong lam hong briefing. news_card_store: diem tiem
+    cho test; mac dinh dung kho decisions/news-cards.json.
 
     Raise ValueError neu config thieu muc `news:` hoac thieu symbol
     cho desk; ImportError/ConnectionError neu khong lay duoc feed
@@ -433,6 +485,20 @@ def build_briefing(cfg, desk, days=3, *, feed=None, news_fetcher=None,
     news_grouped = _group_news(news_result)
     news_errors = list(news_result.get("errors") or [])
 
+    # 2b. Dang tin len feed tin (the tin, impact=None — cho phan
+    # tich). 1 lan / briefing; dedupe theo id trong kho.
+    try:
+        cards_store = (news_card_store if news_card_store is not None
+                       else NewsCardStore())
+        all_articles = []
+        for tier_items in news_grouped.values():
+            all_articles.extend(tier_items)
+        cards_store.publish_cards([
+            _news_card(art, desk, analyst, generated.isoformat())
+            for art in all_articles])
+    except Exception as exc:  # noqa: BLE001 — dang the loi thi bao, khong hong briefing
+        print(f"CANH BAO: khong dang duoc tin len feed tin ({exc}).")
+
     # 3. Vi mo (chi khi config co muc macro:).
     macro = _build_macro(cfg, symbols)
 
@@ -478,7 +544,7 @@ def build_briefing(cfg, desk, days=3, *, feed=None, news_fetcher=None,
 
 
 def cmd_briefing(cfg, desk="forex", days=3, all_desks=False, *, feed=None,
-                 news_fetcher=None, out_dir=None):
+                 news_fetcher=None, out_dir=None, news_card_store=None):
     """Lenh CLI `briefing`: tao briefing 1 desk hoac tat ca 4 desk.
 
     Tra 0 neu xong, 1 neu that bai (in loi tieng Viet ngan gon, KHONG
@@ -488,7 +554,8 @@ def cmd_briefing(cfg, desk="forex", days=3, all_desks=False, *, feed=None,
     desks = list(DESKS) if all_desks else [desk]
     try:
         results = [build_briefing(cfg, d, days, feed=feed,
-                                  news_fetcher=news_fetcher, out_dir=out_dir)
+                                  news_fetcher=news_fetcher, out_dir=out_dir,
+                                  news_card_store=news_card_store)
                    for d in desks]
     except (ValueError, ImportError, ConnectionError, OSError) as exc:
         print(f"LOI: {exc}")

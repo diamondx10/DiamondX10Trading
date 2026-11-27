@@ -40,7 +40,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -66,7 +66,8 @@ from .webauth import (
     OTPManager,
     SessionStore,
 )
-from .briefing import DESK_ANALYSTS, DESKS as BRIEFING_DESKS, build_briefing
+from .briefing import DESK_ANALYSTS, DESKS as BRIEFING_DESKS
+from .briefing import _article_dict, _news_card, build_briefing
 from .config import load_config
 from .dashboard import (
     _find_backtest_result,
@@ -78,6 +79,7 @@ from .dashboard import (
 from .data.feeds import SimulatedFeed
 from .data.history import HistoryStore
 from .data.news import DEFAULT_STORE_PATH as NEWS_STORE_PATH
+from .data.news import run_news
 from .data.providers import build_feed
 from .listener import place_pending_order
 from .models.quant import atr as _atr
@@ -182,6 +184,206 @@ def _apply_language_to_config_text(text, language):
             out.append("")
         out.append(f"language: {language}")
     return "\n".join(out) + "\n"
+
+
+def _apply_news_settings_to_config_text(text, settings):
+    """Ap dung cac khoa vao muc `news:` cua config.yaml.
+
+    Giong _apply_language_to_config_text (sua theo dong, giu nguyen
+    cac khoa/comment khac): doi dong khoa trong khoi `news:` neu co;
+    chua co thi chen ngay sau dong `news:` (neu khoi `news:` da co)
+    hoac them khoi `news:` moi o cuoi file. `settings`: dict
+    key -> gia tri da format san cho YAML (vd "true", "5"). Khong
+    bao gio tao file — chi sua text da doc duoc (endpoint kiem tra
+    file ton tai truoc).
+    """
+    lines = text.splitlines()
+    # 1. Tim khoi `news:` cap cao nhat (dong khong thut dau).
+    news_idx = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if (not line.startswith((" ", "\t")) and stripped
+                and stripped.startswith("news:")):
+            news_idx = i
+            break
+    if news_idx is None:
+        out = list(lines)
+        if out and out[-1].strip():
+            out.append("")
+        out.append("news:")
+        for key, value in settings.items():
+            out.append(f"  {key}: {value}")
+        return "\n".join(out) + "\n"
+    # 2. Cuoi khoi news: (dong sau `news:` den khoa cap cao nhat ke
+    # tiep) — gioi han pham vi tim/chen khoa.
+    end = len(lines)
+    for i in range(news_idx + 1, len(lines)):
+        stripped = lines[i].strip()
+        if (not lines[i].startswith((" ", "\t")) and stripped
+                and not stripped.startswith("#")):
+            end = i
+            break
+    pending = dict(settings)
+    for i in range(news_idx + 1, end):
+        stripped = lines[i].strip()
+        for key in list(pending):
+            if stripped.startswith(f"{key}:"):
+                indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
+                lines[i] = f"{indent or '  '}{key}: {pending.pop(key)}"
+    # 3. Khoa con thieu: chen ngay sau dong `news:` (neu dong do la
+    # khoi rong, khong phai mapping inline nhu `news: {}`).
+    if pending:
+        news_line = lines[news_idx].strip()
+        at = news_idx + 1
+        if not (news_line == "news:"
+                or news_line.startswith("news: #")):
+            at = end
+        insert = [f"  {key}: {value}"
+                  for key, value in pending.items()]
+        lines[at:at] = insert
+    return "\n".join(lines) + "\n"
+
+
+def _apply_test_mode_to_config_text(text, test_mode):
+    """Ap dung `test_mode:` vao muc `news:` (xem
+    _apply_news_settings_to_config_text)."""
+    return _apply_news_settings_to_config_text(
+        text, {"test_mode": "true" if test_mode else "false"})
+
+
+# --- Lay tin + dang the tin (dung chung cho POST /api/news-fetch va
+# vong tu dong lay tin) ---
+
+def _fetch_news_once(cfg):
+    """1 luot lay tin tat ca desk + dang the tin moi len feed.
+
+    Giong lenh CLI `news --all` (xem __main__._cmd_news): dung
+    run_news + kho NewsStore ben vung (dedupe MD5) + NewsCardStore.
+    publish_cards (dedupe theo id). Tra {"fetched", "matched",
+    "new", "cards_created", "errors"}. Chua cau hinh nguon tin thi
+    raise ValueError (endpoint doi thanh 400, vong tu dong chi log
+    roi cho luot sau). KHONG gui Telegram — chi lay tin + dang the
+    (the moi o trang thai "dang cho phan tich" den khi verdict ve
+    qua chu ky briefing/verdict).
+    """
+    news_cfg = (cfg or {}).get("news") or {}
+    if not (news_cfg.get("sources") or []):
+        raise ValueError(
+            "Chua cau hinh nguon tin (muc 'news' trong config.yaml) — "
+            "xem config.example.yaml")
+    try:
+        days = int(news_cfg.get("max_age_days") or 2)
+    except (TypeError, ValueError):
+        days = 2
+    result = run_news(news_cfg, desk=None, max_age_days=days)
+    created = 0
+    try:
+        from .newsfeed import NewsCardStore
+        store = NewsCardStore()
+        created_utc = datetime.now(timezone.utc).isoformat()
+        cards = []
+        for article in result.get("articles") or []:
+            tags = list(getattr(article, "desk_tags", []) or [])
+            art_desk = tags[0] if tags else "forex"
+            analyst = DESK_ANALYSTS.get(art_desk, art_desk)
+            cards.append(_news_card(_article_dict(article), art_desk,
+                                    analyst, created_utc))
+        if cards:
+            created, _skipped = store.publish_cards(cards)
+    except Exception as exc:  # noqa: BLE001 — dang the loi thi bao, khong hong luot lay tin
+        print(f"LOI webapi news-fetch cards: {exc}")
+    return {"fetched": int(result.get("fetched") or 0),
+            "matched": int(result.get("matched") or 0),
+            "new": int(result.get("new") or 0),
+            "cards_created": int(created),
+            "errors": list(result.get("errors") or [])}
+
+
+# --- Vong tu dong lay tin (chay nen, khong phu thuoc trinh duyet) ---
+
+_AUTO_FETCH_INTERVAL_DEFAULT = 5
+_AUTO_FETCH_INTERVAL_MIN = 1
+_AUTO_FETCH_INTERVAL_MAX = 60
+_AUTO_FETCH_STATE = {"last_fetch_utc": None, "next_fetch_utc": None}
+_AUTO_FETCH_STATE_LOCK = threading.Lock()
+_AUTO_FETCH_THREAD = None
+_AUTO_FETCH_WAKE = threading.Event()
+
+
+def _clamp_auto_fetch_interval(value):
+    """Khoang thoi gian tu dong lay tin (phut), kep 1–60."""
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        minutes = _AUTO_FETCH_INTERVAL_DEFAULT
+    return max(_AUTO_FETCH_INTERVAL_MIN,
+               min(_AUTO_FETCH_INTERVAL_MAX, minutes))
+
+
+def _auto_fetch_config(cfg):
+    """(enabled, interval_min) tu config — mac dinh tat / 5 phut."""
+    news_cfg = (cfg or {}).get("news") or {}
+    return (bool(news_cfg.get("auto_fetch_enabled")),
+            _clamp_auto_fetch_interval(
+                news_cfg.get("auto_fetch_interval_min")))
+
+
+def _auto_fetch_state():
+    """Trang thai vong tu dong lay tin: enabled/interval tu config
+    (nguon that), last/next fetch tu runtime."""
+    cfg = _load_cfg()
+    enabled, interval = _auto_fetch_config(cfg)
+    with _AUTO_FETCH_STATE_LOCK:
+        last = _AUTO_FETCH_STATE["last_fetch_utc"]
+        nxt = _AUTO_FETCH_STATE["next_fetch_utc"]
+    return {"enabled": enabled, "interval_min": interval,
+            "last_fetch_utc": last, "next_fetch_utc": nxt}
+
+
+def _auto_fetch_loop():
+    """Vong lap nen: doc config moi luot; bat thi lay tin ngay roi
+    cho het khoang thoi gian; tat thi cho 5 giay roi doc lai config
+    (POST bat/tat goi _AUTO_FETCH_WAKE de luot hien tai tinh lai
+    ngay, khong doi het khoang cho). Luot loi (chua cau hinh /
+    mang loi) chi log roi cho luot sau — khong bao gio crash
+    server, khong bao gio gui Telegram."""
+    while True:
+        cfg = _load_cfg()
+        enabled, interval = _auto_fetch_config(cfg)
+        if not enabled:
+            with _AUTO_FETCH_STATE_LOCK:
+                _AUTO_FETCH_STATE["next_fetch_utc"] = None
+            _AUTO_FETCH_WAKE.wait(timeout=5)
+            _AUTO_FETCH_WAKE.clear()
+            continue
+        try:
+            _fetch_news_once(cfg)
+            now = datetime.now(timezone.utc)
+            with _AUTO_FETCH_STATE_LOCK:
+                _AUTO_FETCH_STATE["last_fetch_utc"] = now.isoformat()
+                nxt = now + timedelta(minutes=interval)
+                _AUTO_FETCH_STATE["next_fetch_utc"] = nxt.isoformat()
+        except Exception as exc:  # noqa: BLE001 — luot loi thi log, cho luot sau
+            print(f"LOI webapi auto-fetch: {exc}")
+            now = datetime.now(timezone.utc)
+            with _AUTO_FETCH_STATE_LOCK:
+                _AUTO_FETCH_STATE["next_fetch_utc"] = (
+                    now + timedelta(minutes=interval)).isoformat()
+        _AUTO_FETCH_WAKE.wait(timeout=interval * 60)
+        _AUTO_FETCH_WAKE.clear()
+
+
+def _ensure_auto_fetch_thread():
+    """Khoi dong vong tu dong lay tin 1 lan duy nhat (daemon — chet
+    cung server). Goi o create_app de cau hinh bat san tu config
+    cung chay ma khong can mo trinh duyet."""
+    global _AUTO_FETCH_THREAD
+    if _AUTO_FETCH_THREAD is not None and _AUTO_FETCH_THREAD.is_alive():
+        return
+    thread = threading.Thread(target=_auto_fetch_loop, daemon=True,
+                              name="dx10-auto-fetch")
+    thread.start()
+    _AUTO_FETCH_THREAD = thread
 
 
 def _latest_briefing_by_desk():
@@ -455,6 +657,11 @@ def _spawn_proc(argv):
     src_dir = str(REPO_ROOT / "src")
     existing = env.get("PYTHONPATH") or ""
     env["PYTHONPATH"] = src_dir + (os.pathsep + existing if existing else "")
+    # Log chay thang ra stdout khi tien trinh con dang chay (khong doi
+    # day bo dem): LogViewer poll /api/logs moi 2 giay thay dong moi
+    # ngay, thay vi chi thay khi tien trinh thoat. Chi anh huong
+    # tien trinh con cua web UI (live / listener / diagnostics).
+    env["PYTHONUNBUFFERED"] = "1"
     return subprocess.Popen(
         argv, cwd=str(REPO_ROOT), env=env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -608,6 +815,11 @@ def create_app(static_dir=None):
     static_path = Path(static_dir) if static_dir is not None else STATIC_DIR
     app = FastAPI(title="DiamondX10 WebAPI")
 
+    # Vong tu dong lay tin chay nen theo config (quy tac 60): khoi
+    # dong 1 lan duy nhat cho ca process — app nao tao sau cung
+    # dung chung vong do, khong tao them thread.
+    _ensure_auto_fetch_thread()
+
     @app.exception_handler(Exception)
     async def _unhandled(request, exc):  # noqa: ARG001
         # Moi loi bat ngo deu tra JSON sach, khong traceback.
@@ -714,6 +926,19 @@ def create_app(static_dir=None):
             return FileResponse(str(index_path))
         return {"message": "frontend chua duoc build — API van hoat dong",
                 "api": "/api/status"}
+
+    @app.get("/favicon.svg")
+    def favicon():
+        """Icon web UI (dau kim cuong + X, webui/public/favicon.svg dem
+        vao build). SVG la text nen day len GitHub duoc (push snapshot
+        chi cho file UTF-8, khong cho file nhi phan nhu PNG). Khong doi
+        auth (nhu GET /) de trinh duyet tai duoc khi mo trang."""
+        icon_path = static_path / "favicon.svg"
+        if icon_path.is_file():
+            return FileResponse(str(icon_path), media_type="image/svg+xml")
+        raise HTTPException(
+            status_code=404,
+            detail="chua co favicon — build web UI truoc")
 
     # --- Trang thai / vi the ---
 
@@ -1015,6 +1240,93 @@ def create_app(static_dir=None):
                 detail=f"khong ghi duoc config.yaml: {exc}")
         return {"language": language}
 
+    # --- Che do thu nghiem tin tuc (quy tac 59) ---
+
+    @app.get("/api/news-test-mode")
+    def api_news_test_mode():
+        cfg = _load_cfg()
+        return {"test_mode": bool(
+            ((cfg or {}).get("news") or {}).get("test_mode"))}
+
+    @app.post("/api/news-test-mode")
+    def api_news_test_mode_post(payload: dict):
+        test_mode = payload.get("test_mode") \
+            if isinstance(payload, dict) else None
+        if not isinstance(test_mode, bool):
+            raise HTTPException(
+                status_code=400,
+                detail="test_mode phai la true hoac false")
+        if not DEFAULT_CONFIG_PATH.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail="khong tim thay config.yaml — chay quickstart "
+                       "truoc de tao config (khong tu tao config nua "
+                       "voi)")
+        try:
+            text = DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"khong doc duoc config.yaml: {exc}")
+        try:
+            DEFAULT_CONFIG_PATH.write_text(
+                _apply_test_mode_to_config_text(text, test_mode),
+                encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"khong ghi duoc config.yaml: {exc}")
+        return {"test_mode": test_mode}
+
+    # --- Tu dong lay tin (quy tac 60) ---
+
+    @app.get("/api/news-auto-fetch")
+    def api_news_auto_fetch():
+        return _auto_fetch_state()
+
+    @app.post("/api/news-auto-fetch")
+    def api_news_auto_fetch_post(payload: dict):
+        payload = payload if isinstance(payload, dict) else {}
+        cfg = _load_cfg()
+        enabled_now, interval_now = _auto_fetch_config(cfg)
+        enabled = payload.get("enabled", enabled_now)
+        if not isinstance(enabled, bool):
+            raise HTTPException(
+                status_code=400,
+                detail="enabled phai la true hoac false")
+        interval = payload.get("interval_min", interval_now)
+        if isinstance(interval, bool) or not isinstance(interval, int):
+            raise HTTPException(
+                status_code=400,
+                detail="interval_min phai la so nguyen (phut)")
+        interval = _clamp_auto_fetch_interval(interval)
+        if not DEFAULT_CONFIG_PATH.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail="khong tim thay config.yaml — chay quickstart "
+                       "truoc de tao config (khong tu tao config nua "
+                       "voi)")
+        try:
+            text = DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"khong doc duoc config.yaml: {exc}")
+        try:
+            DEFAULT_CONFIG_PATH.write_text(
+                _apply_news_settings_to_config_text(text, {
+                    "auto_fetch_enabled": "true" if enabled else "false",
+                    "auto_fetch_interval_min": str(interval)}),
+                encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"khong ghi duoc config.yaml: {exc}")
+        # Tinh lai vong lap ngay: bat thi lay tin ngay 1 luot, tat
+        # thi dung cho luot tiep theo.
+        _AUTO_FETCH_WAKE.set()
+        return _auto_fetch_state()
+
     # --- Tin doi da phan tich (trang chu, quy tac 52) ---
 
     @app.get("/api/team-news")
@@ -1047,6 +1359,54 @@ def create_app(static_dir=None):
             "verdicts": verdicts_out,
             "briefings": briefings,
         }
+
+    # --- The tin tuc tren feed trang chu (quy tac 58) ---
+
+    @app.get("/api/news-cards")
+    def api_news_cards(limit: int = 50, desk: str = None):
+        """The tin tuc hien tren feed trang chu, moi nhat len dau.
+
+        ?limit=N (mac dinh 50, kep 1–200) &desk=forex (tuy chon).
+        Kho thieu/hong thi tra danh sach rong — khong bao gio raise
+        (giong /api/team-news, /api/posts). Moi card co `impact`
+        (None neu chua co phan tich tac dong cua Muse) de feed hien
+        trang thai "dang cho phan tich".
+        """
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 50
+        limit = max(1, min(limit, 200))
+        try:
+            from .newsfeed import NewsCardStore
+        except Exception as exc:  # noqa: BLE001 — chua co module thi rong
+            print(f"LOI webapi news-cards: {exc}")
+            return {"cards": []}
+        try:
+            return {"cards": NewsCardStore().list_cards(
+                limit=limit, desk=desk)}
+        except Exception as exc:  # noqa: BLE001 — kho hong thi rong
+            print(f"LOI webapi news-cards: {exc}")
+            return {"cards": []}
+
+    @app.post("/api/news-fetch")
+    def api_news_fetch(payload: dict = None):
+        """Lay tin ngay (tat ca desk) + dang the tin moi len feed.
+
+        Giong lenh CLI `news --all` (xem __main__._cmd_news): dung
+        chung _fetch_news_once voi vong tu dong lay tin. Chua cau
+        hinh nguon tin (muc `news:` trong config) thi 400 ro rang,
+        khong tra success rong, khong traceback.
+        """
+        cfg = _load_cfg()
+        try:
+            return _fetch_news_once(cfg)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:  # noqa: BLE001 — lay tin loi thi 500 sach, khong traceback
+            print(f"LOI webapi news-fetch: {exc}")
+            raise HTTPException(
+                status_code=500, detail=f"khong tai duoc tin: {exc}")
 
     # --- Bai dang phan tich (feed trang chu) ---
 

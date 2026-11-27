@@ -66,7 +66,8 @@ def validate_verdict(data):
 
     Schema: {desk, analyst, direction: buy|sell|neutral,
     confidence: float 0..1, drivers: [str], risks: [str], note: str,
-    created_utc: ISO timestamp}. Thieu created_utc thi dien gio UTC
+    created_utc: ISO timestamp, news_impacts: [muc tac dong tung tin]
+    (tuy chon, vang mat -> [])}. Thieu created_utc thi dien gio UTC
     hien tai. Bat ky loi nao cung raise ValueError voi thong bao ro
     rang (khong traceback o CLI — cmd_verdict bat va in sach).
     """
@@ -112,10 +113,85 @@ def validate_verdict(data):
         created_utc = _now_utc_iso()
     else:
         created_utc = _parse_created_utc(created).isoformat()
+    news_impacts = _validate_news_impacts(data.get("news_impacts"))
     return {"desk": desk, "analyst": analyst.strip(),
             "direction": direction, "confidence": confidence,
             "drivers": list(drivers), "risks": list(risks),
-            "note": note, "created_utc": created_utc}
+            "note": note, "created_utc": created_utc,
+            "news_impacts": news_impacts}
+
+
+def _validate_news_impacts(value):
+    """Kiem tra nhan dinh tac dong tung tin (per-item impact verdict).
+
+    Schema moi muc: {news_id: str khong rong, impact:
+    positive|negative|neutral, direction: buy|sell|neutral,
+    confidence: so 0..1, summary: str (duoc rong), affected_symbol:
+    str hoac None}. Vang mat -> []. Muc nao sai thi ValueError —
+    ca verdict bi loai, khong luu gi (chat nhu validation verdict
+    desk). news_id la van CHAP NHAN (verdict co the nhac tin chua
+    co tren feed — luc gan len the thi chi khong khop the nao).
+    Truong "verdict_created_utc" trong muc (neu co) phai la chuoi
+    ISO, duoc giu nguyen; vang mat thi luc gan the, the se lay
+    created_utc cua verdict.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(
+            f"news_impacts phai la list, nhan {type(value).__name__}.")
+    cleaned = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(
+                "moi muc news_impacts phai la 1 object JSON (dict), "
+                f"nhan {type(item).__name__}.")
+        news_id = item.get("news_id")
+        if not isinstance(news_id, str) or not news_id.strip():
+            raise ValueError("moi muc news_impacts can news_id "
+                             "(chuoi khong rong, id cua tin trong "
+                             "briefing/feed).")
+        impact = item.get("impact")
+        if impact not in ("positive", "negative", "neutral"):
+            raise ValueError(
+                f"news_impacts impact khong hop le: {impact!r} "
+                "(chon positive | negative | neutral)")
+        direction = item.get("direction")
+        if direction not in DIRECTIONS:
+            raise ValueError(
+                f"news_impacts direction khong hop le: {direction!r} "
+                "(chon buy | sell | neutral)")
+        confidence = item.get("confidence")
+        if (isinstance(confidence, bool)
+                or not isinstance(confidence, (int, float))):
+            raise ValueError(
+                "news_impacts confidence phai la so 0..1, "
+                f"nhan {confidence!r}")
+        confidence = float(confidence)
+        if not 0.0 <= confidence <= 1.0:
+            raise ValueError(
+                "news_impacts confidence phai trong 0..1, "
+                f"nhan {confidence!r}")
+        summary = item.get("summary", "")
+        if not isinstance(summary, str):
+            raise ValueError(
+                "news_impacts summary phai la chuoi, "
+                f"nhan {type(summary).__name__}.")
+        affected = item.get("affected_symbol")
+        if affected is not None and not isinstance(affected, str):
+            raise ValueError(
+                "news_impacts affected_symbol phai la chuoi hoac null, "
+                f"nhan {affected!r}")
+        entry = {"news_id": news_id, "impact": impact,
+                 "direction": direction, "confidence": confidence,
+                 "summary": summary, "affected_symbol": affected}
+        created = item.get("verdict_created_utc")
+        if created is not None:
+            entry["verdict_created_utc"] = (
+                _parse_created_utc(created, "verdict_created_utc")
+                .isoformat())
+        cleaned.append(entry)
+    return cleaned
 
 
 def _store_path(path=None):
@@ -291,12 +367,20 @@ def _verdict_age_hours(verdict, now=None):
     return (now - created).total_seconds() / 3600.0
 
 
-def cmd_verdict(cfg, file, *, store_path=None):
+def cmd_verdict(cfg, file, *, store_path=None, news_card_store=None):
     """Luu nhan dinh PTCB tu file JSON. Tra 0 neu luu duoc, 1 neu loi.
 
     File chua 1 nhan dinh hoac {"verdicts": [...]}. Loi doc file hay
     nhan dinh khong hop le deu in thong bao tieng Viet ro rang (khong
     traceback) va tra 1; khong luu gi khi co loi.
+
+    Sau moi verdict duoc luu, nhan dinh tac dong tung tin cua no
+    (news_impacts) duoc gan len the tin (NewsCardStore.attach_impacts)
+    — CHI hien thi tren feed tin, KHONG gui Telegram o day (Telegram
+    chi gui qua duong dang bai `synthesize --publish`, xem posts.py).
+    Gan len the loi thi chi in canh bao, khong lam hong viec luu
+    verdict. news_card_store: diem tiem cho test; mac dinh dung kho
+    decisions/news-cards.json.
     """
     path = Path(file)
     try:
@@ -330,13 +414,27 @@ def cmd_verdict(cfg, file, *, store_path=None):
               f"analyst {verdict['analyst']} — "
               f"direction {verdict['direction']} "
               f"(tin cay {verdict['confidence']:g})")
+        if verdict.get("news_impacts"):
+            try:
+                from .newsfeed import NewsCardStore
+                cards = (news_card_store if news_card_store is not None
+                         else NewsCardStore())
+                matched = cards.attach_impacts(
+                    verdict["news_impacts"], verdict["created_utc"])
+                if matched:
+                    print(f"Da gan {matched} nhan dinh tac dong len "
+                          "the tin.")
+            except Exception as exc:  # noqa: BLE001 — gan the loi thi bao, khong hong verdict
+                print(f"CANH BAO: khong gan duoc nhan dinh tac dong len "
+                      f"the tin ({exc}).")
     print(f"Kho nhan dinh: {store}")
     return 0
 
 
 def cmd_synthesize(cfg, desk="forex", symbol=None, *, store_path=None,
                    out_path=None, feed_factory=None, publish=False,
-                   post_store=None, posts_path=None):
+                   post_store=None, posts_path=None,
+                   news_card_store=None, test_mode=None):
     """Tong hop Yuling cho 1 desk: PTKT tu feed + PTCB da luu.
 
     In khuyen nghi moi symbol (recommendation, he so size, rationale
@@ -350,6 +448,12 @@ def cmd_synthesize(cfg, desk="forex", symbol=None, *, store_path=None,
     HOLD hoac bi chan; bai BUY/SELL thi gui tom tat qua Telegram.
     post_store (PostStore) hoac posts_path (duong dan file kho) chi
     dung cho test; mac dinh dung kho decisions/analysis-posts.json.
+    news_card_store: kho the tin (chi dung cho test); mac dinh dung
+    kho decisions/news-cards.json — de tim tier cua tin khi xet
+    nhan dinh tac dong tung tin cho bai dang.
+    test_mode: che do TEST cho lan dang nay (None = doc
+    `news.test_mode` trong cfg; True = bat — moi tin co verdict tac
+    dong deu duoc dang + gui Telegram, bai danh dau [TEST]).
     Loi dang bai chi in canh bao, khong lam hong ket qua tong hop.
     """
     cfg = cfg or {}
@@ -431,7 +535,10 @@ def cmd_synthesize(cfg, desk="forex", symbol=None, *, store_path=None,
                          else PostStore(posts_path))
                 post, created = publish_synthesis_post(
                     store, cfg, desk, sym, ta_action, ta_reason,
-                    ta_levels, verdict, syn)
+                    ta_levels, verdict, syn,
+                    verdicts=list(verdicts.values()),
+                    news_card_store=news_card_store,
+                    test_mode=test_mode)
                 if created:
                     print(f"Da dang bai phan tich: {post['id']} — "
                           f"{sym} {post['action']}")

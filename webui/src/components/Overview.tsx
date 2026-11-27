@@ -3,9 +3,8 @@ import { apiGet, apiPost, fmtPct, fmtUsd, type Status } from '../api'
 import { useI18n } from '../i18n'
 import { Empty, Err, Loading, StatusDot, useFetch } from './shared'
 import AnalysisFeed from './Feed'
-import TeamNewsSection from './TeamNews'
 
-export default function Overview({ onOpenNews }: { onOpenNews: () => void }) {
+export default function Overview() {
   const { t } = useI18n()
   const { data, loading, error, reload } = useFetch(() => apiGet<Status>('/api/status'))
   const [busy, setBusy] = useState('')
@@ -48,8 +47,6 @@ export default function Overview({ onOpenNews }: { onOpenNews: () => void }) {
       </div>
 
       <AnalysisFeed />
-
-      <TeamNewsSection onOpenNews={onOpenNews} />
 
       <div className="card">
         <h2>{t('ov.killSwitch')}</h2>

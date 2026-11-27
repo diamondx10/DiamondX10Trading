@@ -6,7 +6,7 @@ cho Muse, nap verdict, xem tin + backtest + bieu do nen — tat ca tu
 trinh duyet, khong can go lenh CLI.
 
 > Da doi chieu 2026-11-27: danh sach endpoint o muc 4 khop 1-1 voi route
-> table trong `src/diamondx10/webapi.py` (31 route).
+> table trong `src/diamondx10/webapi.py` (44 route `/api/*`).
 
 ## 1. Chay
 
@@ -37,6 +37,11 @@ Mo trinh duyet: http://127.0.0.1:8000
 - Chay tren Linux khong co MT5 thi UI van mo duoc, nhung muc live /
   vi the / tin hieu se trong hoac bao loi do khong doc duoc MT5 —
   dung de xem giao dien, khong dung de giao dich.
+- Icon trinh duyet (favicon) la logo DiamondX:
+  `webui/public/favicon.png` — `npm run build` dem vao
+  `src/diamondx10/static/favicon.png`, server tra o
+  `GET /favicon.png` (khong doi dang nhap), `index.html` co link
+  `<link rel="icon" type="image/png" href="./favicon.png">`.
 
 ## 2. Build lai frontend — chi khi code frontend doi
 
@@ -123,6 +128,12 @@ Goc: `http://127.0.0.1:8000`. Tat ca tra JSON. Tru 3 route
 | GET | `/api/language` | Ngon ngu giao dien hien tai (`vi` \| `en`) |
 | POST | `/api/language` | Doi ngon ngu (`{"language": "vi" \| "en"}`) |
 | GET | `/api/team-news` | Tin doi da phan tich trang chu (xem muc 7) |
+| GET | `/api/news-cards?limit=&desk=` | The tin tuc tren feed, moi nhat len dau; `limit` mac dinh 50, kep 1–200; `desk` tuy chon (`forex` / `xauusd` / `crypto` / `us_securities`); tra `{"cards": [...]}` (moi the co `impact` hoac `null` khi chua co phan tich tac dong) — kho thieu/hong thi tra list rong, khong bao gio 500 (xem muc 7–8) |
+| POST | `/api/news-fetch` | Lay tin ngay (tat ca desk, giong lenh `news --all`) + dang the tin moi len feed; tra `{"fetched","matched","new","cards_created","errors"}`; chua cau hinh nguon tin thi 400 (xem muc 7) |
+| GET | `/api/news-test-mode` | Che do TEST tin tuc hien tai (`{"test_mode": bool}`, quy tac 59) |
+| POST | `/api/news-test-mode` | Bat/tat che do TEST tin tuc (`{"test_mode": bool}`, luu vao config.yaml; config thieu thi 404, quy tac 59) |
+| GET | `/api/news-auto-fetch` | Trang thai tu dong lay tin (`{"enabled","interval_min","last_fetch_utc","next_fetch_utc"}`, quy tac 60) |
+| POST | `/api/news-auto-fetch` | Bat/tat + doi khoang thoi gian tu dong lay tin (`{"enabled": bool, "interval_min": int}` — kep 1–60, sai kieu thi 400; luu vao config.yaml; config thieu thi 404, quy tac 60) |
 | GET | `/api/posts?limit=&desk=` | Feed bai dang phan tich, moi nhat len dau; `limit` mac dinh 20, kep 1–200; `desk` tuy chon (`forex` / `xauusd` / `crypto` / `us_securities`); tra `{"posts": [...]}` (xem muc 8) |
 | POST | `/api/posts` | Dang 1 bai phan tich thu cong (composer); body `{desk, symbol, action, summary, confidence?, entry?, sl?, tp?, drivers?, risks?}`; 201 tra `{"post": {...}}`; thieu/sai truong → 400 (xem muc 8) |
 | POST | `/api/publish` | Chay tong hop Yuling + dang 1 bai / symbol; body `{desk?, symbol?}` (mac dinh `desk=forex`, tat ca symbol cua desk); tra `{"posts": [...]}` chi bai MOI tao (bai da co do dedupe khong nam trong danh sach); desk sai → 400; tong hop loi → 500 (xem muc 8) |
@@ -197,38 +208,79 @@ Khong lam duoc (va khong bao gio lam):
   ngu goc. Nhan tieng Viet tren web UI co dau day du (xem
   `webui/src/i18n.tsx`); **CLI/console/log van tieng Viet khong dau.**
 
-### Tin doi da phan tich o trang chu
+### The tin tuc tren feed trang chu (quy tac 58)
 
-Trang chu hien muc tin cua doi qua 1 endpoint gop
-`GET /api/team-news` tra `{"items", "verdicts", "briefings"}`:
+Muc "Tin team da phan tich" rieng biet o trang chu da bo — tin tuc
+hien **cung feed** voi bai dang phan tich (xem muc 8), khong con 2
+danh sach tin canh tranh nhau. Endpoint
+`GET /api/news-cards?limit=&desk=` tra `{"cards": [...]}`:
 
-- `items`: bai tin **moi nhat moi desk** tu kho tin (`NewsStore`):
-  `title`, `source`, `tier` (1 chinh thong / 2 bao chi / 3 ro ri —
-  chua xac minh), `desk`, `analyst` (Yuling Pan / Yumi / Rich /
-  Kathy), `time`, `briefing_url` (duong dan tuong doi
-  `briefings/<file briefing moi nhat cua desk>`; null neu chua co
-  briefing — mo file tu tab Muse / danh sach briefing).
-- `verdicts`: nhan dinh PTCB moi nhat **moi desk**
-  (`{direction: buy|sell|neutral, confidence}` hoac `null` neu
-  chua co verdict) — doc tu `decisions/fundamental-verdicts.json`.
-- `briefings`: file briefing moi nhat moi desk
-  (`{desk, file, time}`).
-- Thieu du lieu (chua chay `news`, chua co verdict/briefing) thi tra
-  list rong / `null`, khong bao gio loi — muc tin chi hien "chua co
-  du lieu".
+- Moi the: `id`, `title`, `link` (ra nguon, mo tab moi), `source`,
+  `summary`, `tier` (1 chinh thong / 2 bao chi / 3 ro ri — chua
+  xac minh), `desk`, `analyst` (Yuling Pan / Yumi / Rich / Kathy),
+  `published_utc`, `created_utc`, `impact`.
+- `impact`: nhan dinh tac dong cua Muse cho chinh tin do
+  (`{impact: positive|negative|neutral, direction: buy|sell|neutral,
+  confidence, summary, affected_symbol, verdict_created_utc}`) hoac
+  `null` khi chua co phan tich — feed hien trang thai "dang cho
+  phan tich tac dong".
+- The luu o `decisions/news-cards.json` (file runtime, da gitignore),
+  1 bai bao chi co 1 the (dedupe theo id).
+- Thieu/hong kho thi tra list rong, khong bao gio loi — feed chi
+  hien bai dang phan tich.
+- Endpoint cu `GET /api/team-news` van con (tra `{"items",
+  "verdicts", "briefings"}` nhu truoc) nhung trang chu khong dung
+  nua.
 
-## 8. Feed bai dang phan tich o trang chu (quy tac 53–54)
+### Tai tin ngay + tu dong tai tin (quy tac 58, 60)
+
+Truoc day khong co nut nao lay tin o web UI — tab Tin tuc chi hien
+tin da phan tich (trong khi chua co briefing/verdict thi trong),
+`news` / `briefing` chi co o CLI. Gio tab Tin tuc co nut
+**"Tai tin ngay"** (`POST /api/news-fetch`, khong can tham so):
+chay 1 luot lay tin tat ca desk giong lenh CLI `news --all`
+(`run_news` + kho `NewsStore` ben vung) roi dang the tin moi len
+feed ngay qua `NewsCardStore.publish_cards`; tra
+`{"fetched","matched","new","cards_created","errors"}` va hien so
+dem / loi ngay duoi nut, roi tai lai danh sach. Chua cau hinh
+nguon tin (muc `news:` trong config) thi nut bao loi ro rang
+("Chua cau hinh nguon tin...") — khong tra success rong. Khi chua
+co the tin nao, feed va tab Tin tuc noi ro "chua tai tin nao" va
+chi ve nut "Tai tin ngay" thay vi chi hien danh sach trong.
+
+Cung tab Tin tuc co dieu khien **tu dong tai tin** (quy tac 60):
+checkbox bat/tat + o nhap khoang thoi gian (phut) + nut Luu.
+Co `news.auto_fetch_enabled` (mac dinh false) va
+`news.auto_fetch_interval_min` (mac dinh 5, kep 1–60 phut o ca
+server lan UI) — luu vao config.yaml nen song qua khoi dong lai
+server. Vong nen (daemon thread trong server, doc config moi
+luot): bat thi lay tin ngay 1 luot roi cu moi interval lai lay,
+tat thi cho 5 giay roi doc lai config; dong trinh duyet van lay
+tin. Trang thai hien ngay duoi dieu khien: dang bat/tat, lan lay
+gan nhat, lan lay tiep theo (`GET /api/news-auto-fetch` tra
+`{"enabled","interval_min","last_fetch_utc","next_fetch_utc"}`).
+Lay tin (tay hay tu dong) chi lay + dang the — the moi o trang
+thai "dang cho phan tich" den khi verdict ve qua chu ky
+briefing/verdict (muse-auto); vong tu dong **khong bao gio gui
+Telegram** va khong tu kich hoat gui briefing cho Muse.
+
+## 8. Feed bai dang phan tich o trang chu (quy tac 53–54, 58)
 
 Trang chu (tab Overview) la **feed kieu Facebook**: ket qua phan
 tich cua doi dang len nhu bai dang, moi nhat len dau, moi bai deu
-mang 1 ket luan. Code: `webui/src/components/Feed.tsx`
-(`AnalysisFeed`: composer + post card + feed), `Overview.tsx` dat
-feed vao trang chu, `webui/src/api.ts` (`Post` / `PostCreate`,
-`fetchPosts` / `createPost` / `publishPosts`), `webui/src/i18n.tsx`
-(30 khoa `feed.*`, ca `vi` + `en`), `webui/src/styles.css` (style
-feed). Backend: `src/diamondx10/posts.py` (`PostStore`),
-`src/diamondx10/telegram.py` (`format_post_summary`),
-`src/diamondx10/webapi.py` (3 endpoint muc 4).
+mang 1 ket luan — **tron chung voi the tin tuc** (quy tac 58): bai
+dang va the tin xep chung 1 dong thoi gian theo `created_utc`, moi
+nhat len dau. Code: `webui/src/components/Feed.tsx`
+(`AnalysisFeed`: composer + post card + news card + feed),
+`Overview.tsx` dat feed vao trang chu, `webui/src/api.ts` (`Post` /
+`PostCreate`, `fetchPosts` / `createPost` / `publishPosts`,
+`NewsCard` / `fetchNewsCards`), `webui/src/i18n.tsx`
+(30 khoa `feed.*` + 4 khoa `newsCard.*`, ca `vi` + `en`),
+`webui/src/styles.css` (style feed). Backend:
+`src/diamondx10/posts.py` (`PostStore`), `src/diamondx10/newsfeed.py`
+(`NewsCardStore`), `src/diamondx10/telegram.py`
+(`format_post_summary`), `src/diamondx10/webapi.py` (4 endpoint
+muc 4).
 
 ### Bo cuc trang chu (feed-first)
 
@@ -238,9 +290,8 @@ Thu tu tu tren xuong trong `Overview.tsx`:
    the dang mo, trang thai MT5 / Telegram / Live / Listener).
 2. **Feed** — cot giua toi da **680px** (`.feed-column`:
    `max-width: 680px; margin: 0 auto`), composer o tren cung, duoi
-   la danh sach bai dang.
-3. Muc "Tin team da phan tich" (`TeamNewsSection`, muc 7).
-4. Kill switch, dieu khien live/listener, von theo desk.
+   la danh sach bai dang tron voi the tin tuc.
+3. Kill switch, dieu khien live/listener, von theo desk.
 
 ### Composer — dang bai thu cong
 
@@ -275,6 +326,30 @@ avatar "DX"); bam vao thi mo form day du:
 - **Chan bai:** desk + nguon (`Tong hop TA+FA` neu `source` la
   `synthesis`, `Dang tay` neu `manual`) + thoi gian verdict neu co
   (`Verdict: {thoi gian tuong doi}`).
+
+### The tin (news card) — giai phau 1 the (quy tac 58)
+
+The tin dung chung khung `.post-card` voi bai dang, nhan
+`Tin tức` / `News` o goc phai thay cho badge ket luan:
+
+- **Dau the:** avatar tron (2 chu cai dau ten analyst, nen mau theo
+  desk) + ten analyst + desk + thoi gian tuong doi (giong bai dang).
+- **Than the:** tieu de bai bao (link ra nguon, mo tab moi) + tom tat
+  tin neu co.
+- **Phan tich tac dong** (khung `.news-impact`, doc nhu 1 comment ben
+  duoi the): neu co `impact` thi hien badge huong (MUA / BAN / CHO
+  theo `direction`), symbol chiu tac dong (`affected_symbol`), do
+  tin cay % va tom tat cach tin tac dong (`summary`) + thoi gian
+  verdict neu co; neu `impact` la `null` thi hien trang thai
+  "Đang chờ phân tích tác động từ Muse" (`newsCard.awaitingAnalysis`).
+- **Chan the:** nguon tin + nhan tier (`Tier 1/2/3` + nhan tin cay:
+  chinh thong / bao chi / ro ri — chua xac minh).
+
+Nut loc theo desk ap dung cho ca bai dang lan the tin; neu
+`/api/news-cards` loi thi feed chi hien bai dang (khong vo trang
+chu). Composer va bai dang phan tich khong doi. **Bai o che do
+TEST** (`test_mode: true` tren bai dang, quy tac 59) co badge
+**[TEST]** o dau bai, canh badge ket luan.
 
 Truong bai dang (backend `PostStore`, luu o
 `decisions/analysis-posts.json` — file runtime, da gitignore):
@@ -384,14 +459,28 @@ khong dau nao trong ban tieng Anh. Ten tien trinh hien thi cung
 duoc dich (Live / Telegram listener / Kiem tra he thong); chi
 tiet ky thuat (exception, ma thoat) giu nguyen dang goc.
 
+**Che do TEST tin tuc (quy tac 59).** Duoi nut kill switch o muc
+Dieu khien co them toggle **Che do thu nghiem**: GET gia tri hien
+tai tu `GET /api/news-test-mode`, bat/tat thi `POST
+/api/news-test-mode {"test_mode": bool}` (luu vao config.yaml
+local theo kieu sua theo dong nhu endpoint language; config.yaml
+thieu thi 404, khong tu tao file). Bat len thi moi tin co verdict
+tac dong buy/sell deu duoc dang bai + gui khuyen nghi Telegram
+(bo qua nguong 0.6 / dong thuan / loai tier); bai test luon danh
+dau [TEST] tren feed va "[TEST] " trong tin Telegram.
+
 **Xem log terminal (quy tac 56).** Trong tab Quan ly co khung
 terminal: chon tien trinh (Live / Telegram / Kiem tra he thong),
 poll `GET /api/logs?process=...&after=...` moi ~2 giay, hien ~200
 dong moi nhat (nen toi, chu monospace, tu cuon xuong co nut tam
 dung). Tren khung co dong trang thai: dang chay / da dung, gio
 bat dau, ma thoat — de biet dang chay o buoc nao, ket qua ra sao
-(`test_run.py` in buoc `[n/8]`; vong live in tung vong). Log chi
-luu trong bo nho server (vong dem ~500 dong / tien trinh, khong
+(`test_run.py` in buoc `[n/8]`; vong live in tung vong). Tien trinh
+con duoc spawn voi `PYTHONUNBUFFERED=1` (quy tac 58) nen log chay
+thang ra stdout khi tien trinh van dang chay — khung terminal thay
+dong moi ngay sau moi lan poll, khong phai doi tien trinh thoat
+moi thay (truoc day stdout bi dem theo khoi khi noi qua pipe).
+Log chi luu trong bo nho server (vong dem ~500 dong / tien trinh, khong
 ghi file); chi gom log cua tien trinh duoc quan ly (live,
 listener, diagnostics) — dong khoi dong cua chinh server webapi
 van chi o cua so console.
@@ -401,6 +490,9 @@ van chi o cua so console.
 - `docs/trading-principles.md` quy tac 47–48 (web UI, UI dung
   lai kiem tra cua backend), quy tac 51–52 (song ngu + tin doi),
   quy tac 53–54 (feed bai dang phan tich + dedupe + Telegram),
+  quy tac 58 (the tin tuc tren feed + phan tich tac dong +
+  chuan kich hoat Telegram + log streaming), quy tac 59 (che do
+  TEST tin tuc) va quy tac 60 (tu dong lay tin),
   quy tac 55–56 (dang nhap OTP + tab Quan ly + log terminal).
 - `docs/dx10-flow.md` — flow van hanh 24/7 (live + listener).
 - `docs/live-loop.md` §6 — che do khuyen nghi + nut dat lenh.

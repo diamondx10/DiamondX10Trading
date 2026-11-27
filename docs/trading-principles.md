@@ -718,6 +718,69 @@
     trinh hien thi cung duoc dich qua
     `i18n.proc_display_name`, chi tiet ky thuat giu nguyen
     dang goc.
+58. **[ĐÃ CÓ — 2026-11-27] Tin tuc len feed trang chu + phan tich
+    tac dong tung tin + chuan kich hoat Telegram** (`src/diamondx10/
+    newsfeed.py`, `src/diamondx10/webapi.py` `GET /api/news-cards`,
+    `webui/src/components/Feed.tsx`, `webui/src/api.ts`,
+    xem `docs/web-ui.md` §7–8, `docs/live-loop.md` §4): the tin
+    (news card) luu o `decisions/news-cards.json` (file runtime, da
+    gitignore) — 1 bai bao chi co 1 the (dedupe theo id); moi the co
+    `impact` la nhan dinh tac dong cua Muse cho chinh tin do
+    (direction buy/sell/neutral, confidence, affected_symbol,
+    summary) hoac `null` khi chua co phan tich. Feed trang chu
+    tron bai dang phan tich va the tin vao 1 dong thoi gian, moi
+    nhat len dau (tron theo `created_utc`); the tin hien tieu de
+    (link ra nguon, mo tab moi), nguon, thoi gian tuong doi, nhan
+    tier (1 chinh thong / 2 bao chi / 3 ro ri — chua xac minh),
+    desk + analyst, va phan tich tac dong nhu 1 comment ben duoi
+    (huong + symbol chiu tac dong + do tin cay + tom tat cach tin
+    tac dong); chua co impact thi hien "dang cho phan tich tac
+    dong". Muc "Tin team da phan tich" rieng biet o trang chu da
+    bo — khong con 2 danh sach tin canh tranh nhau (endpoint cu
+    `GET /api/team-news` van con de tuong thich). **Chuan kich
+    hoat Telegram (da chot 2026-11-27):** 1 tin chi kich hoat
+    khuyen nghi Telegram khi verdict tac dong cua no la buy/sell
+    voi do tin cay >= 0.6, tin thuoc tier 1 hoac 2, VA tong hop
+    Yuling cua desk dong thuan (quy tac 40: PTCB mot minh khong
+    tao lenh); tin tier 3 (ro ri) KHONG BAO GIO kich hoat
+    Telegram mot minh. Telegram chi gui qua duong dang bai hien
+    co (`synthesize --publish` / `POST /api/publish`) — module
+    the tin khong goi Telegram truc tiep.
+59. **[ĐÃ CÓ — 2026-11-27] Che do TEST cho tin tuc (news.test_mode)**
+    (`src/diamondx10/newsfeed.py` `is_test_mode` / `news_qualifies`,
+    `src/diamondx10/posts.py`, `src/diamondx10/webapi.py`
+    `GET|POST /api/news-test-mode`, `webui/src/components/Manager.tsx`,
+    xem `docs/web-ui.md` §7–9): co `news.test_mode` trong config
+    (mac dinh false; bat tam 1 lan ma khong doi config:
+    `synthesize --publish --test-mode`). Bat len thi MOI tin co
+    verdict tac dong buy/sell deu duoc dang bai + gui khuyen nghi
+    Telegram, bo qua nguong tin cay 0.6 / dong thuan tong hop /
+    loai tier — bai test luon ghi `"test_mode": true` len bai dang
+    (feed hien badge [TEST]) va tin Telegram luon co tien to
+    "[TEST] ", khong bao gio nham voi khuyen nghi that. Toggle o
+    tab Quan ly (GET gia tri hien tai, POST de doi, luu vao
+    config.yaml local theo kieu sua theo dong nhu endpoint
+    language; config.yaml thieu thi 404, khong tu tao file).
+60. **[ĐÃ CÓ — 2026-11-27] Tu dong lay tin dinh ky (auto-fetch)**
+    (`src/diamondx10/webapi.py` `_fetch_news_once` /
+    `_auto_fetch_loop` / `GET|POST /api/news-auto-fetch`,
+    `POST /api/news-fetch`, `webui/src/components/News.tsx`,
+    xem `docs/web-ui.md` §7): co `news.auto_fetch_enabled`
+    (mac dinh false) + `news.auto_fetch_interval_min` (mac dinh 5,
+    kep 1–60 phut). Vong nen (daemon thread trong server, khong
+    phu thuoc trinh duyet — dong trinh duyet van lay tin) doc
+    config moi luot: bat thi lay tin ngay 1 luot roi cu moi
+    interval lai lay (dung chung ham lay tin + dang the voi nut
+    "Tai tin ngay"); tat thi cho 5 giay roi doc lai config.
+    Trang thai hien o tab Tin tuc: bat/tat, khoang thoi gian,
+    lan lay gan nhat, lan lay tiep theo. Lay tin chi lay + dang
+    the (dedupe MD5 + dedupe id — lay lai cung tin khong tao the
+    trung); the moi o trang thai "dang cho phan tich" den khi
+    verdict ve qua chu ky briefing/verdict (muse-auto). Vong tu
+    dong KHONG BAO GIO gui Telegram va khong tu kich hoat gui
+    briefing cho Muse — Telegram chi di qua duong dang bai /
+    verdict hien co (chuan 0.6, quy tac 58; che do TEST thi moi
+    tin deu danh dau [TEST], quy tac 59).
 
 ## 8. Những điểm đang lệch giữa nghiên cứu và code
 
@@ -757,6 +820,19 @@
   Telegram mặc định tắt, token chỉ qua biến môi trường (mục 31); xem
   `docs/live-loop.md`. Chưa kiểm chứng live: chu kỳ thật trên máy Windows
   có MT5 demo + token Telegram thật.
+- [x] Tin tức lên feed + chuẩn kích hoạt Telegram — chốt 2026-11-27:
+  thẻ tin (`decisions/news-cards.json`) trộn vào feed trang chủ cùng
+  bài đăng phân tích, mỗi thẻ có phân tích tác động của Muse hoặc trạng
+  thái đang chờ; tin chỉ kích hoạt khuyến nghị Telegram khi verdict tác
+  động buy/sell với độ tin cậy ≥ 0,6, tier 1/2, và tổng hợp Yuling đồng
+  thuận — tier 3 không bao giờ kích hoạt một mình (mục 58); xem
+  `docs/web-ui.md` §7–8, `docs/live-loop.md` §4.
+- [x] Chế độ TEST tin tức + tự động tải tin — chốt 2026-11-27:
+  `news.test_mode` (toggle ở tab Quản lý, bài test đánh dấu [TEST] trên
+  feed và trong tin Telegram) và auto-fetch (`news.auto_fetch_enabled` /
+  `news.auto_fetch_interval_min`, mặc định tắt / 5 phút, vòng nền trong
+  server, không bao giờ tự gửi Telegram) (mục 59–60); xem
+  `docs/web-ui.md` §7, §9.
 - [ ] Theo dõi: hạ rủi ro desk vàng xuống 2–3% — chỉ quyết sau khi có số ATR thật từ MT5 demo (mục 8).
 - [ ] **Giới hạn rủi ro toàn quỹ — các con số mặc định Phase F (mục 33): lỗ trong ngày 3% vốn quỹ, tối đa 10 vị thế mở toàn quỹ, tối đa 2 vị thế mở/desk — cần Phu duyệt (giữ nguyên, tăng hay giảm).**
 - [ ] Donchian breakout có dùng cho đường live không — cần Phu duyệt + bằng chứng walk-forward (mục 23).

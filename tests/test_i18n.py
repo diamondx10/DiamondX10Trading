@@ -400,7 +400,7 @@ def test_briefing_verdict_schema_unchanged_in_both_languages(tmp_path):
         template = data["verdict_template"]
         assert set(template) == {"desk", "analyst", "direction",
                                  "confidence", "drivers", "risks", "note",
-                                 "created_utc"}
+                                 "created_utc", "news_impacts"}
         assert template["direction"] in ("buy", "sell", "neutral")
         assert 0 <= template["confidence"] <= 1
         block = re.search(r"```json\n(.*?)\n```", md, re.S).group(1)

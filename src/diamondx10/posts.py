@@ -28,6 +28,12 @@ from pathlib import Path
 
 from . import telegram as telegram_mod
 from .briefing import DESK_ANALYSTS
+from .newsfeed import (
+    NewsCardStore,
+    impacts_for_symbol,
+    is_test_mode,
+    news_qualifies,
+)
 
 DESKS = ("forex", "xauusd", "crypto", "us_securities")
 ACTIONS = ("BUY", "SELL", "NEUTRAL")
@@ -185,13 +191,23 @@ class PostStore:
     def publish_post(self, *, desk, symbol, action, summary,
                      confidence=0.0, drivers=None, risks=None, entry=None,
                      sl=None, tp=None, analyst=None, source="manual",
-                     verdict_created_utc=None, cfg=None):
+                     verdict_created_utc=None, cfg=None, news_id=None,
+                     test_mode=False):
         """Dang 1 bai moi. Tra (post, created).
 
         created=False khi dedupe: source "synthesis" ma bai moi nhat
         cua cung symbol co cung action VA cung verdict_created_utc
-        thi tra lai bai cu (khong tao bai moi, khong gui Telegram
-        lai). Bai manual luon tao moi (created=True).
+        VA cung che do test thi tra lai bai cu (khong tao bai moi,
+        khong gui Telegram lai). Bai manual luon tao moi (created=True).
+
+        news_id (tuy chon): id tin da kich hoat bai nay (xem
+        publish_synthesis_post) — chi ghi len bai khi truyen, bai
+        khong co tin kich hoat thi khong co truong nay.
+
+        test_mode (tuy chon): bai dang o che do TEST (xem newsfeed.
+        is_test_mode) thi ghi "test_mode": true len bai va tin
+        Telegram gui di kem tien to "[TEST] " — khong bao gio nham
+        voi khuyen nghi that. Bai thuong khong co truong nay.
 
         Bai BUY/SELL moi thi gui tom tat qua Telegram (chi khi
         telegram.enabled = true); NEUTRAL khong gui. Loi gui Telegram
@@ -212,7 +228,8 @@ class PostStore:
             if (latest is not None
                     and latest.get("action") == action
                     and latest.get("verdict_created_utc")
-                    == verdict_created_utc):
+                    == verdict_created_utc
+                    and bool(latest.get("test_mode")) == bool(test_mode)):
                 return dict(latest), False
         if (not isinstance(analyst, str) or not analyst.strip()):
             analyst = _analyst_for_desk(cfg, desk)
@@ -226,6 +243,10 @@ class PostStore:
             "source": source,
             "verdict_created_utc": verdict_created_utc,
         })
+        if news_id is not None:
+            post["news_id"] = news_id
+        if test_mode:
+            post["test_mode"] = True
         posts.append(post)
         self._save(posts)
         if action in ("BUY", "SELL"):
@@ -268,6 +289,9 @@ class PostStore:
             if not telegram_mod.telegram_enabled(cfg):
                 return False
             text = telegram_mod.format_post_summary(post, cfg=cfg)
+            if post.get("test_mode"):
+                # Bai test luon danh dau ro trong chinh tin Telegram.
+                text = "[TEST] " + text
             return bool(telegram_mod.send_message(text, cfg=cfg))
         except Exception as exc:  # noqa: BLE001 — gui loi thi bao, khong crash
             print("CANH BAO: khong gui duoc tom tat bai phan tich qua "
@@ -325,17 +349,40 @@ def _synthesis_summary(ta_action, ta_reason, verdict, levels, action,
 
 
 def publish_synthesis_post(store, cfg, desk, symbol, ta_action, ta_reason,
-                           levels, verdict, syn):
+                           levels, verdict, syn, *, verdicts=None,
+                           news_card_store=None, test_mode=None):
     """Dang 1 bai tu ket qua tong hop Yuling (xem PostStore.publish_post).
 
     action: BUY/SELL khi PTKT co huong va khong bi chan, NEUTRAL khi
     HOLD hoac bi chan. confidence/drivers/risks lay tu verdict (neu
     co); entry/sl/tp lay tu levels TA (chi khi BUY/SELL). Tra
     (post, created) — created=False khi dedupe tra bai cu.
+
+    Tin kich hoat (chi khi action BUY/SELL): trong cac verdict da luu
+    (verdicts, mac dinh chi verdict cua desk nay), tim nhan dinh tac
+    dong tung tin cho symbol nay; tin nao du chuan
+    (newsfeed.news_qualifies — direction buy/sell, tin cay >= 0.6,
+    tier 1/2, tong hop dong thuan) thi bai dang kem tom tat tac dong
+    do vao drivers + tom tat, va ghi "news_id" len bai. Bai BUY/SELL
+    thi tom tat van gui qua Telegram theo duong hien co — KHONG co
+    them lenh gui Telegram nao o day. Tin khong du chuan (tier 3,
+    tin cay thap, tong hop khong dong thuan) thi khong kich hoat
+    gi them — impact cua no van hien tren the tin (da gan luc luu
+    verdict). verdicts / news_card_store: diem tiem cho test.
+
+    test_mode: che do TEST (None = doc `news.test_mode` trong cfg).
+    Bat len thi MOI impact buy/sell deu du chuan (bo qua nguong 0.6 /
+    dong thuan / loai tier), bai dang ghi "test_mode": true va tin
+    Telegram kem tien to "[TEST] ". Phan tich tac dong van la verdict
+    that cua Muse — che do test chi bo cua kich hoat, khong tao
+    phan tich gia.
     """
     action = _synthesis_action(ta_action, syn)
     blocked = bool(syn.get("blocked"))
     levels = levels or {}
+    if test_mode is None:
+        test_mode = is_test_mode(cfg)
+    test_mode = bool(test_mode)
     if action in ("BUY", "SELL"):
         entry, sl, tp = (levels.get("entry"), levels.get("sl"),
                          levels.get("tp"))
@@ -343,17 +390,67 @@ def publish_synthesis_post(store, cfg, desk, symbol, ta_action, ta_reason,
         entry, sl, tp = None, None, None
     summary = _synthesis_summary(ta_action, ta_reason, verdict, levels,
                                  action, blocked)
+    drivers = list((verdict or {}).get("drivers") or [])
+    risks = list((verdict or {}).get("risks") or [])
+    news_id = None
+    if action in ("BUY", "SELL"):
+        news_id, news_summary = _qualifying_news_impact(
+            verdicts if verdicts is not None
+            else ([verdict] if verdict else []),
+            symbol, action, news_card_store, test_mode)
+        if news_id is not None:
+            if news_summary:
+                drivers = drivers + [news_summary]
+                summary = summary + f" Tin lien quan: {news_summary}"
+            else:
+                summary = summary + " Co tin lien quan kich hoat khuyen nghi nay."
     return store.publish_post(
         desk=desk, symbol=symbol, action=action, summary=summary,
         confidence=(verdict.get("confidence") if verdict else 0.0),
-        drivers=(verdict.get("drivers") if verdict else []),
-        risks=(verdict.get("risks") if verdict else []),
+        drivers=drivers,
+        risks=risks,
         entry=entry, sl=sl, tp=tp,
         analyst=(verdict.get("analyst") if verdict else None),
         source="synthesis",
         verdict_created_utc=(
             verdict.get("created_utc") if verdict else None),
-        cfg=cfg)
+        cfg=cfg, news_id=news_id, test_mode=test_mode)
+
+
+def _qualifying_news_impact(verdicts, symbol, action, news_card_store,
+                            test_mode=False):
+    """Tim tin du chuan kich hoat bai BUY/SELL cho 1 symbol.
+
+    Tra (news_id, summary) cua impact du chuan co do tin cay cao
+    nhat, hoac (None, None) neu khong co. Tier lay tu the tin trong
+    kho (khong co the thi coi nhu khong du chuan — khong doan tier);
+    o che do test thi tier khong can nua (news_qualifies bo qua)
+    nhung van can the tin de biet tier khi khong phai test.
+    """
+    impacts = impacts_for_symbol(verdicts, symbol)
+    if not impacts:
+        return None, None
+    store = (news_card_store if news_card_store is not None
+             else NewsCardStore())
+    best = None
+    for impact in impacts:
+        try:
+            card = store.get_card(impact.get("news_id"))
+        except Exception:  # noqa: BLE001 — doc kho the loi thi coi nhu khong co the
+            card = None
+        tier = card.get("tier") if isinstance(card, dict) else None
+        if tier is None and not test_mode:
+            continue
+        if not news_qualifies(impact, tier, action, test_mode=test_mode):
+            continue
+        if best is None or float(impact.get("confidence") or 0.0) > float(
+                best.get("confidence") or 0.0):
+            best = impact
+    if best is None:
+        return None, None
+    summary = best.get("summary")
+    return best.get("news_id"), (summary if isinstance(summary, str)
+                                 else "")
 
 
 def cmd_publish_post(cfg, desk, symbol, action, summary, confidence=0.0,

@@ -191,6 +191,18 @@ history:
 # giao dich + truoc gio tin lon (CPI/FOMC/Nonfarm).
 news:
   max_age_days: 2
+  # Che do TEST: bat len thi MOI tin co verdict tac dong buy/sell deu
+  # duoc dang bai + gui khuyen nghi Telegram, bo qua nguong tin cay
+  # 0.6 / dong thuan tong hop / loai tier (xem docs/analysis-workflow.md
+  # muc 2d). Mac dinh TAT (false). Bat tam 1 lan ma khong doi config:
+  # `synthesize --publish --test-mode`. Bai test luon danh dau [TEST]
+  # (truong test_mode + tien to "[TEST] " trong tin Telegram) — khong
+  # bao gio nham voi khuyen nghi that.
+  test_mode: false
+  # Tu dong lay tin dinh ky (web UI / vong nen): bat len thi tool tu
+  # lay tin moi sau moi auto_fetch_interval_min phut. Mac dinh TAT.
+  auto_fetch_enabled: false
+  auto_fetch_interval_min: 5  # phut giua 2 lan tu lay tin (1–60)
   filters:
     # Tu khoa loai bo (quang cao, tai ban, tin cu).
     blacklist_keywords: ["sponsored", "advertisement", "advertorial",

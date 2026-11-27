@@ -11,11 +11,6 @@ export interface Verdict { desk: string; analyst: string; direction: string; con
 export interface Article { title: string; url: string; source: string; tier: number | string; published: string }
 export interface Bar { time: string; open: number; high: number; low: number; close: number }
 export interface MuseJob { status: 'sending' | 'sent' | 'verdict_stored' | 'timeout' | 'error'; verdict: Record<string, unknown> | null; reason: string }
-export interface TeamNewsItem { title: string; source: string; tier: number | string; desk: string; analyst: string; time: string; briefing_url: string | null }
-export interface TeamNewsVerdict { direction: string; confidence: number | null }
-export interface TeamNewsBriefing { desk: string; file: string; time: string }
-export interface TeamNews { items: TeamNewsItem[]; verdicts: Record<string, TeamNewsVerdict | null>; briefings: TeamNewsBriefing[] }
-
 // Analysis feed (homepage): GET /api/posts, POST /api/posts, POST /api/publish.
 // Every post carries a conclusion (action BUY/SELL/NEUTRAL). The backend
 // sends a Telegram summary whenever the conclusion is BUY or SELL.
@@ -35,6 +30,10 @@ export interface Post {
   tp: number | null
   source: string
   verdict_created_utc: string | null
+  // Set when the post was published in TEST mode (news.test_mode):
+  // the feed shows a [TEST] badge and Telegram carries a "[TEST] "
+  // prefix. Absent (undefined) on ordinary posts.
+  test_mode?: boolean
 }
 export interface PostsResponse { posts: Post[] }
 export interface PostCreate {
@@ -54,6 +53,69 @@ export async function fetchPosts(limit = 20, desk?: string): Promise<PostsRespon
   const q = new URLSearchParams({ limit: String(limit) })
   if (desk) q.set('desk', desk)
   return apiGet<PostsResponse>(`/api/posts?${q.toString()}`)
+}
+
+// News cards on the feed (homepage): GET /api/news-cards. A card is a
+// news item the team follows; `impact` is Muse's per-item impact
+// analysis, null while the analysis is still awaited (rule 58).
+export interface NewsCardImpact {
+  impact: string | null
+  direction: string | null
+  confidence: number | null
+  summary: string | null
+  affected_symbol: string | null
+  verdict_created_utc: string | null
+}
+export interface NewsCard {
+  id: string
+  title: string
+  link: string
+  source: string
+  summary: string | null
+  tier: number
+  desk: string
+  analyst: string
+  published_utc: string
+  created_utc: string
+  impact: NewsCardImpact | null
+  // Same [TEST] marking as Post.test_mode, when the backend sets it.
+  test_mode?: boolean
+}
+export interface NewsCardsResponse { cards: NewsCard[] }
+
+export async function fetchNewsCards(limit = 50, desk?: string): Promise<NewsCardsResponse> {
+  const q = new URLSearchParams({ limit: String(limit) })
+  if (desk) q.set('desk', desk)
+  return apiGet<NewsCardsResponse>(`/api/news-cards?${q.toString()}`)
+}
+
+// Load news now (all desks, same as the `news --all` CLI): fetches
+// market news and posts new cards to the feed immediately.
+export interface NewsFetchResult { fetched: number; matched: number; new: number; cards_created: number; errors: string[] }
+export async function fetchNewsNow(): Promise<NewsFetchResult> {
+  return apiPost<NewsFetchResult>('/api/news-fetch', {})
+}
+
+// News TEST mode (news.test_mode in config.yaml): when on, every
+// qualifying item is published with test_mode=true and its Telegram
+// message carries a "[TEST] " prefix.
+export interface NewsTestMode { test_mode: boolean }
+export async function getNewsTestMode(): Promise<NewsTestMode> {
+  return apiGet<NewsTestMode>('/api/news-test-mode')
+}
+export async function setNewsTestMode(test_mode: boolean): Promise<NewsTestMode> {
+  return apiPost<NewsTestMode>('/api/news-test-mode', { test_mode })
+}
+
+// Auto-fetch (background loop in the server, rule 60): when on, the
+// server fetches news every interval_min minutes even with the
+// browser closed, and posts new cards. Never sends Telegram itself.
+export interface NewsAutoFetchState { enabled: boolean; interval_min: number; last_fetch_utc: string | null; next_fetch_utc: string | null }
+export async function getNewsAutoFetch(): Promise<NewsAutoFetchState> {
+  return apiGet<NewsAutoFetchState>('/api/news-auto-fetch')
+}
+export async function setNewsAutoFetch(enabled: boolean, interval_min: number): Promise<NewsAutoFetchState> {
+  return apiPost<NewsAutoFetchState>('/api/news-auto-fetch', { enabled, interval_min })
 }
 
 export async function createPost(body: PostCreate): Promise<{ post: Post }> {

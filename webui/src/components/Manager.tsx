@@ -2,12 +2,12 @@
 // GET /api/status plus controls for Live (recommend mode), the Telegram
 // listener, system diagnostics, a Telegram test message and the kill
 // switch. Each button reports the backend's result reason.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
-  apiGet, fmtUsd, getListener, getLive, runDiagnostics, startAll,
-  startListener, startLive, stopListener, stopLive, telegramTest,
-  toggleKillSwitch, type ActionResult, type LiveState,
-  type ListenerState, type Status,
+  apiGet, fmtUsd, getListener, getLive, getNewsTestMode, runDiagnostics,
+  setNewsTestMode, startAll, startListener, startLive, stopListener,
+  stopLive, telegramTest, toggleKillSwitch, type ActionResult,
+  type LiveState, type ListenerState, type Status,
 } from '../api'
 import { useI18n } from '../i18n'
 import LogViewer from './LogViewer'
@@ -20,6 +20,17 @@ export default function Manager() {
   const [msg, setMsg] = useState<string | null>(null)
   const [live, setLive] = useState<LiveState | null>(null)
   const [listener, setListener] = useState<ListenerState | null>(null)
+  const [testMode, setTestMode] = useState<boolean | null>(null)
+
+  // Che do TEST cho tin tuc (news.test_mode, quy tac 59): doc 1 lan
+  // khi mo tab; bat/tat thi POST ngay (luu vao config.yaml).
+  useEffect(() => {
+    let cancelled = false
+    getNewsTestMode()
+      .then((r) => { if (!cancelled) setTestMode(r.test_mode) })
+      .catch(() => { if (!cancelled) setTestMode(null) })
+    return () => { cancelled = true }
+  }, [])
 
   async function act(label: string, fn: () => Promise<ActionResult | unknown>) {
     setBusy(label); setMsg(null)
@@ -129,6 +140,18 @@ export default function Manager() {
               {s.kill_switch_on ? t('mgr.killSwitchOn') : t('mgr.killSwitchOff')}
             </strong>
           </label>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <label className="toggle">
+            <input type="checkbox" checked={testMode ?? false} disabled={busy !== '' || testMode === null}
+              onChange={() => act(t('mgr.testMode'), async () => {
+                const r = await setNewsTestMode(!(testMode ?? false))
+                setTestMode(r.test_mode)
+                return r
+              })} />
+            <strong>{t('mgr.testMode')}</strong>
+          </label>
+          <p className="muted small">{t('mgr.testModeHint')}</p>
         </div>
       </div>
 
