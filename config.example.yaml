@@ -12,8 +12,12 @@ risk:
   max_risk_per_trade_pct: 1.0
   # Rui ro RIENG theo symbol (% von cua symbol do). Chi nhung symbol can
   # rui ro cao hon muc chung 1% moi dat duoc 0.01 lot o stop 5%.
-  # Tinh theo gia tham chieu (gia that chay thi tinh lai): EURUSD 1.16,
-  # XAUUSD 5.000, BTCUSD 120.000. Symbol khong co trong bang dung muc chung 1%.
+  # Tinh theo gia tham chieu (gia that chay thi tinh lai). Cap nhat
+  # 2026-11-27 theo gia TradingView: EURUSD 1.0974, XAUUSD 3.650,98,
+  # BTCUSD 61.594. Lot o stop 5% (tinh bang code that): EURUSD 0.01,
+  # XAUUSD 0.01, BTCUSD 0.02, ETHUSD 0.09, BNBUSD 0.29, AMD 0.24,
+  # INTC 1.83, NVDA 0.66, CDNS 0.33, SNPS 0.24. Symbol khong co trong
+  # bang dung muc chung 1%.
   # Neu gia chay vuot gia tham chieu thi symbol do co the lai ve volume 0
   # (tool bao volume 0 chu khong tu tang rui ro) — luc do nhom quyet lai so.
   per_symbol_pct:
@@ -21,8 +25,51 @@ risk:
     XAUUSD: 10.0
     BTCUSD: 8.0
   max_drawdown_pct: 10.0
+  # Canh bao drawdown tung desk (Phase 4, Q1): cham 5% von desk (125 USD)
+  # thi chi chan lenh moi cua desk do; gioi han quy 10% (1.000 USD) thi
+  # chan lenh moi toan bo. Lenh dang mo chi duoc quan ly, khong dong ep.
+  desk_warning_pct: 5.0
+  # Gioi han rui ro TOAN QUY (Phase F — xem docs/fund-risk-ops.md).
+  # [CẦN CHỐT] Cac con so duoi day CHUA DUOC Phu duyet — gia tri mac
+  # dinh than trong de xuat, cho Phu duyet moi thanh quy tac chinh thuc.
+  # fund_daily_loss_pct: lo thuc hien trong ngay >= 3% von quy
+  #   (300 USD tren von 10.000 USD) thi chan mo lenh moi toan quy den
+  #   het ngay; hom sau tinh lai tu dau.
+  # max_open_positions_fund: toi da 10 vi the mo cung luc toan quy
+  #   (10 symbol trong danh muc -> toi da 1 vi the/symbol).
+  # max_open_positions_desk: toi da 2 vi the mo cung luc moi desk.
+  fund_daily_loss_pct: 3.0
+  max_open_positions_fund: 10
+  max_open_positions_desk: 2
   default_stop_loss_pct: 5.0
   default_take_profit_pct: 5.0
+# Chien luoc chung Phase 2 (docs/phase0-desk-rules.md, Phu duyet 2026-11-27):
+# vao lenh SMA5/SMA20 + loc RSI(14) (BUY khi 50 < RSI < 70,
+# SELL khi 30 < RSI < 50; RSI > 80 hoac < 20 thi khong mo lenh moi),
+# SL theo ATR, TP = 2 x khoang cach SL (ti le 2:1). Crypto ghi de rieng
+# he so ATR vi bien dong manh hon. Bang risk o tren GIU NGUYEN.
+strategy:
+  sma_fast: 5
+  sma_slow: 20
+  rsi_period: 14
+  rsi_buy_low: 50
+  rsi_buy_high: 70
+  rsi_sell_low: 30
+  rsi_sell_high: 50
+  rsi_extreme_high: 80
+  rsi_extreme_low: 20
+  atr_period: 14
+  atr_sl_mult: 1.5
+  tp_mult: 2.0
+  trail_mult: 1.5
+  desks:
+    crypto: {atr_sl_mult: 2.0, trail_mult: 2.0}
+  # Tinh chinh theo symbol (Phase B): chi doi con so, khong doi quy tac.
+  # Thu tu uu tien: mac dinh < chung < desk < symbol. Vi du (dang comment,
+  # bo comment de dung): BTCUSD giu 2.0 nhu desk crypto; XAUUSD doi nguong RSI mua.
+  # per_symbol:
+  #   BTCUSD: {atr_sl_mult: 2.0}
+  #   XAUUSD: {rsi_buy_low: 55}
 data:
   # provider: simulated | mt5
   #   simulated: du lieu mo phong (mac dinh, khong can MT5).
@@ -36,6 +83,12 @@ data:
     us_securities: ["AMD", "CDNS", "SNPS", "INTC", "NVDA"]
     xauusd: ["XAUUSD"]
     crypto: ["BTCUSD", "BNBUSD", "ETHUSD"]
+# Backtest Phase 3 (docs/backtest.md): phi + truot gia GIA DINH, bao thu.
+# fee_pct: % tren notional (units x gia vao), tru 1 lan moi lenh tron.
+# slippage_pct: % tren gia vao, ap dung bat loi ca 2 chan (vao + ra).
+backtest:
+  fee_pct: 0.02
+  slippage_pct: 0.01
 mt5:
   # CHI TAI KHOAN DEMO. Connector nay tu choi tai khoan that (xem execution.py).
   demo_only: true
@@ -48,3 +101,156 @@ mt5:
   password_env: MT5_PASSWORD
   # Khung nen lay tu MT5: M1, M5, M15, H1, D1 (mac dinh M15).
   timeframe: M15
+  # Duong dan file terminal64.exe cua MT5. De trong thi quickstart
+  # tu tim (auto-scan moi lan chay); chi dien khi terminal cai o cho
+  # khac vi tri mac dinh. Co the ghi de bang bien moi truong
+  # MT5_TERMINAL_PATH. Duong dan Windows ghi bang dau / de YAML doc
+  # duoc (vd C:/Program Files/MetaTrader 5 EXNESS/terminal64.exe).
+  terminal_path: ""
+# Vong lap live (Phase D — xem docs/live-loop.md).
+# `live --once` chay 1 chu ky roi thoat (dung cho Task Scheduler/cron);
+# khong --once thi lap toi bien nen tiep theo toi khi Ctrl+C.
+# timeframe: khung nen moi chu ky (mac dinh M15).
+# interval_min: so phut giua 2 chu ky o che do lap (mac dinh 15).
+live:
+  timeframe: M15
+  interval_min: 15
+# Che do khuyen nghi (xem docs/live-loop.md §6).
+# require_confirmation: true thi tool KHONG tu dat lenh khi co tin hieu:
+#   chi gui khuyen nghi Telegram kem nut "Dat lenh", cho bam nut moi dat
+#   (lenh telegram-listen nhan nut bam). Mac dinh false = tu dat lenh.
+trading:
+  require_confirmation: false
+# Tong hop Yuling (PTKT + PTCB — xem docs/trading-principles.md, muc 37).
+# verdict_max_age_hours: nhan dinh PTCB cu hon so gio nay thi coi nhu
+#   chua co PTCB moi (size 0.5 theo PTKT; neu require_fa thi chan).
+# require_fa: true thi bat buoc phai co PTCB moi moi cho vao lenh
+#   (thieu/qua han -> KHONG MUA, size 0, blocked).
+# fa_high_confidence: tin cay PTCB >= muc nay thi coi la cao
+#   (dong thuan -> size 1.0; mau thuan -> chan).
+synthesis:
+  verdict_max_age_hours: 24
+  require_fa: false
+  fa_high_confidence: 0.6
+# Canh bao Telegram (Phase D — xem docs/live-loop.md).
+# Mac dinh TAT (enabled: false): chi gui khi user bat len + co token/chat_id.
+# Token KHONG ghi vao file nay: dat bien moi truong ten trong
+# bot_token_env (mac dinh DIAMONDX10_TELEGRAM_TOKEN). chat_id la ID chat
+# nhan canh bao (chat rieng voi bot, hoac ID nhom).
+telegram:
+  enabled: false
+  chat_id: ""
+  bot_token_env: DIAMONDX10_TELEGRAM_TOKEN
+  # Lenh cho xac nhan qua nut Telegram (xem docs/live-loop.md §6).
+  # pending_order_ttl_min: lenh cho het han sau so phut nay (mac dinh 15).
+  # max_entry_deviation_pct: gia thi truong lech khoi gia khuyen nghi qua
+  #   so % nay thi listener tu choi dat lenh (mac dinh 1.0).
+  pending_order_ttl_min: 15
+  max_entry_deviation_pct: 1.0
+# Trinh duyet Muse (xem docs/muse-browser.md).
+# dx10 dieu khien cua so Chromium (Playwright) de gui file briefing
+# cho Muse trong chat, tu dong hoa khau ban giao PTCB (muc 38).
+# Playwright la phu thuoc TU CHON (opt-in): cai bang lenh `muse-setup`,
+# KHONG nam trong luong mac dinh cua quickstart.py.
+# KHONG co token/mat khau o day: dang nhap Muse lam thu cong 1 lan
+# trong cua so trinh duyet, phien dang nhap luu local o profile_dir.
+muse:
+  # URL chat Muse mo trong trinh duyet (mac dinh https://muse.ai).
+  chat_url: https://muse.ai
+  # Thu muc profile trinh duyet giu phien dang nhap Muse cua user.
+  # File RUNTIME, da gitignore — KHONG commit, KHONG copy di dau.
+  profile_dir: data/muse-profile
+  # headless: false = mo cua so trinh duyet that de user thay va dang
+  #   nhap duoc; true = chay ngam (chi dung khi phien da luu san).
+  headless: false
+  # wait_min: so phut toi da doi Muse tra verdict JSON sau khi gui
+  #   briefing (mac dinh 10). Het gio ma chua co verdict thi lenh
+  #   thoat 1 — dung `verdict --file` nap tay sau.
+  wait_min: 10
+# Kho nen OHLC local (Phase A — xem docs/history-store.md).
+# Backfill keo nen tu MT5 demo vao SQLite de backtest tren du lieu that.
+# db_path tuong doi theo goc repo; file nay la file RUNTIME (da gitignore).
+history:
+  db_path: data/history.db
+  default_timeframe: M15
+  backfill_days: 90
+# Tin tuc thi truong (Phase merge DiamondX10 + ThaoResearch — xem docs/market-news.md).
+# Lay tin RSS cong khai, khong can credential. Tin chi la boi canh —
+# khong tu dong doi tin hieu hay dat lenh. Chu ky chay: truoc phien
+# giao dich + truoc gio tin lon (CPI/FOMC/Nonfarm).
+news:
+  max_age_days: 2
+  filters:
+    # Tu khoa loai bo (quang cao, tai ban, tin cu).
+    blacklist_keywords: ["sponsored", "advertisement", "advertorial",
+                         "giveaway", "promo code"]
+    # Tu khoa khan (danh dau [KHAN] trong bao cao tin).
+    high_priority_keywords: ["Federal Reserve", "FOMC", "interest rate decision",
+                             "CPI", "Nonfarm", "rate cut", "rate hike",
+                             "earnings", "ECB rate decision"]
+  desks:
+    forex:
+      keywords: ["EURUSD", "euro", "ECB", "Federal Reserve", "Fed",
+                 "dollar index", "DXY", "CPI", "inflation", "interest rate"]
+    xauusd:
+      keywords: ["gold", "XAUUSD", "bullion", "COMEX", "central bank gold",
+                 "troy ounce", "LBMA"]
+    crypto:
+      keywords: ["Bitcoin", "BTC", "Ethereum", "ETH", "BNB", "Binance",
+                 "crypto", "cryptocurrency"]
+    us_securities:
+      keywords: ["NVDA", "Nvidia", "AMD", "Intel", "INTC", "Cadence",
+                 "CDNS", "Synopsys", "SNPS", "semiconductor", "AI chip",
+                 "earnings"]
+  # Nguon tin: tier 2 (BAO CHI — feed RSS cong khai). Tier 1 CHINH THONG
+  # (Fed/ECB/SEC...) doc thu cong, khong co feed; tier 3 RO RI (x.com)
+  # Rich tim thu cong, khong co feed tu dong — xem docs/market-news.md.
+  # URL lay tu catalog cua ThaoResearch (da kiem chung); cac truy van
+  # Google News theo dung mau cua catalog do.
+  sources:
+    - {name: "Google News — Gold", tier: 2, desks: ["xauusd"],
+       url: "https://news.google.com/rss/search?q=gold+price+OR+%22gold+futures%22+OR+bullion+OR+%22central+bank+gold%22+when%3A30d&hl=en-US&gl=US&ceid=US:en"}
+    - {name: "Google News — Fed/ECB/CPI", tier: 2, desks: ["forex"],
+       url: "https://news.google.com/rss/search?q=%22Federal+Reserve%22+OR+ECB+OR+%22interest+rate+decision%22+OR+CPI+when%3A7d&hl=en-US&gl=US&ceid=US:en"}
+    - {name: "Google News — Bitcoin", tier: 2, desks: ["crypto"],
+       url: "https://news.google.com/rss/search?q=Bitcoin+OR+Ethereum+OR+BNB+price+when%3A7d&hl=en-US&gl=US&ceid=US:en"}
+    - {name: "Google News — AI chips/earnings", tier: 2, desks: ["us_securities"],
+       url: "https://news.google.com/rss/search?q=NVDA+OR+Nvidia+OR+AMD+OR+semiconductor+earnings+when%3A7d&hl=en-US&gl=US&ceid=US:en"}
+    - {name: "Bloomberg — Markets", tier: 2, desks: ["forex", "us_securities"],
+       url: "https://feeds.bloomberg.com/markets/news.rss"}
+    - {name: "WSJ — Markets", tier: 2, desks: ["forex", "us_securities"],
+       url: "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"}
+    - {name: "FT — Commodities", tier: 2, desks: ["xauusd"],
+       url: "https://www.ft.com/commodities?format=rss"}
+    - {name: "Investing.com — Commodities", tier: 2, desks: ["xauusd"],
+       url: "https://www.investing.com/rss/news_11.rss"}
+    - {name: "Nasdaq — Commodities", tier: 2, desks: ["xauusd", "us_securities"],
+       url: "https://www.nasdaq.com/feed/rssoutbound?category=Commodities"}
+    - {name: "Mining.com", tier: 2, desks: ["xauusd"],
+       url: "https://www.mining.com/feed/"}
+    - {name: "OilPrice.com", tier: 2, desks: ["xauusd", "forex"],
+       url: "https://oilprice.com/rss/main"}
+    - {name: "Guardian — Commodities", tier: 2, desks: ["xauusd"],
+       url: "https://www.theguardian.com/business/commodities/rss"}
+# Snapshot vi mo cho macro edge (Yuling cung cap — xem docs/trading-principles.md,
+# quy tac 22). DE COMMENT khi co so that; khong co muc nay thi bao cao
+# khong in phan vi mo. Nguon du lieu live con cho Phu chot
+# (yfinance hay nhap tay — xem docs/merge-diamondx10-2026-11-27.md).
+# macro:
+#   dxy: 100.0
+#   us10y: 4.0
+#   vix: 18.0
+#   spx: 4500.0
+# Su kien cam mo lenh moi (Phase 4, Q4 — xem docs/phase0-desk-rules.md).
+# Mac dinh RONG: Phu/Kathy bo sung su kien cu the khi co lich.
+# Moi su kien: name, start (ISO datetime — GIO BAT DAU cua so cam,
+# vd 30 phut truoc gio tin), window_minutes, symbols (tuy chon: chi ap
+# cho cac symbol do; khong ghi thi ap cho moi symbol). Trong cua so cam
+# chi quan ly lenh cu, khong mo lenh moi.
+no_trade_events: []
+  # Vi du (de comment, bo dau # de dung — nho doi ngay gio that):
+  # - {name: "CPI My", start: "2026-12-10T20:00:00+07:00", window_minutes: 60}
+  # - {name: "FOMC", start: "2026-12-16T01:30:00+07:00", window_minutes: 60}
+  # - {name: "Nonfarm Payrolls", start: "2026-12-04T20:00:00+07:00", window_minutes: 60}
+  # - {name: "NVDA earnings", start: "2026-11-19T00:00:00+07:00",
+  #    window_minutes: 10080, symbols: ["NVDA"]}

@@ -49,6 +49,10 @@ def build_feed(cfg, desk, symbol=None, mt5_module=None):
             server=mt5_cfg.get("server"),
             timeframe=mt5_cfg.get("timeframe", "M15"),
             mt5_module=mt5_module,
+            # Duong dan terminal trong config (mt5.terminal_path);
+            # de trong (None) thi MT5Feed tu tim: bien moi truong
+            # MT5_TERMINAL_PATH roi auto-scan (xem mt5_feed.py).
+            path=mt5_cfg.get("terminal_path") or None,
         )
     raise ValueError(
         f"Provider du lieu khong biet: {provider!r} "

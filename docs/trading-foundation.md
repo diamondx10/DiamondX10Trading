@@ -47,6 +47,20 @@ x.com** (tin rò rỉ, tin đồn) để cấp cho team. Thông tin rò rỉ ph�
 ghi rõ là **chưa xác minh** cho tới khi có xác nhận — không được viết
 như sự thật đã kiểm chứng, và không được dùng làm căn cứ duy nhất
 cho một quyết định giao dịch. Xem `DiamondX-VR-Office/docs/real-outputs.md`.
+
+**Luồng lấy tin thị trường trong tool (merge 2026-11-27, từ
+ThaoResearch — xem `docs/market-news.md`):** lệnh `news [--desk]
+[--days]` lấy feed RSS công khai (Bloomberg/FT/WSJ/Investing.com/
+Nasdaq/Mining.com/OilPrice/Guardian + truy vấn Google News theo từng
+desk), lọc theo từ khóa từng desk, gắn tag desk, đánh dấu tin khẩn,
+dedup bằng SQLite (`data/news-history.db`). **Phân tầng độ tin cậy —
+bắt buộc, repo gốc không có:** tier 1 CHÍNH THỐNG (Yuling đọc tay từ
+Fed/ECB/SEC..., không có feed tự động), tier 2 BÁO CHÍ (feed RSS),
+tier 3 RÒ RỈ (x.com — Rich tìm tay, luôn gắn nhãn CHƯA XÁC MINH).
+Chu kỳ chạy: trước phiên giao dịch + trước giờ tin lớn
+(CPI/FOMC/Nonfarm). Tin chỉ là bối cảnh cho người phụ trách desk đọc
+trước khi duyệt tín hiệu — **không tự đổi tín hiệu, không tự đặt lệnh**,
+và **không bao giờ lấy "giá" từ tiêu đề báo** (giá chỉ từ MT5).
 Mỗi mảng cần trả lời, bằng văn bản, trước khi chốt nguyên tắc:
 
 **Forex — EURUSD (Yuling)**
@@ -103,6 +117,16 @@ không hiện thực được.
 
 **Phân tích kỹ thuật Forex (EURUSD) — đã chốt 2026-11-26: Yuling làm.**
 Yuling phụ trách cả cơ bản và kỹ thuật cho desk Forex của mình.
+
+**Bối cảnh bổ sung từ repo DiamondX10 cũ (merge 2026-11-27 — chỉ là
+bối cảnh, chưa phải quy tắc chặn lệnh; xem
+`docs/trading-principles.md` mục 21–23):** regime theo ADX (≥ 25
+trending, 15–25 transitional, < 15 ranging) + hướng SMA20/SMA50 in kèm
+tín hiệu; macro edge DXY/US10Y/VIX/SPX in trong báo cáo ngày khi Yuling
+cung cấp snapshot; breakout Donchian 20 là **ứng viên so sánh trong
+backtest** (`backtest --strategy donchian`), chưa dùng live. Nếu backtest
+(walk-forward) cho thấy Donchian hoặc regime giúp ích, nhóm chốt lại ở
+đây rồi mới cài vào đường live.
 
 **Đầu ra yêu cầu (mỗi mảng):**
 1. Chỉ báo dùng + khung thời gian + ngưỡng số.

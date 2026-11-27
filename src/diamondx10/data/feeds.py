@@ -12,7 +12,16 @@ class DataFeed(ABC):
 
     @abstractmethod
     def bars(self, n: int = 60):
-        """Tra ve n bar gan nhat: list[{'time': int, 'close': float}]."""
+        """Tra ve n bar gan nhat, dinh dang OHLC day du:
+
+        list[{'time': int, 'open': float, 'high': float,
+              'low': float, 'close': float}]
+
+        'time' la timestamp (giay, epoch) cua bar; 'close' la gia dong
+        cua — cac consumer cu chi dung 'close' van chay nhu truoc.
+        Bat buoc: high >= max(open, close), low <= min(open, close),
+        'time' tang dan theo thu tu bar.
+        """
 
     @abstractmethod
     def latest_price(self, symbol: str) -> float:
@@ -30,8 +39,18 @@ class SimulatedFeed(DataFeed):
     def _make_bars(self, n):
         bars, price = [], 100.0
         for i in range(n):
+            open_price = price
             price *= 1 + self._rng.gauss(0, 0.005)
-            bars.append({"time": i, "close": round(price, 4)})
+            close = round(price, 4)
+            # High/low suy ra xac dinh tu open/close (dung RNG da seed
+            # nen cung desk+seed cho ra cung bar): high >= max(open,
+            # close), low <= min(open, close).
+            half_range = (abs(close - open_price)
+                          + abs(self._rng.gauss(0, 0.002)) * open_price) / 2
+            high = round(max(open_price, close) + half_range, 4)
+            low = round(min(open_price, close) - half_range, 4)
+            bars.append({"time": i, "open": round(open_price, 4),
+                         "high": high, "low": low, "close": close})
         return bars
 
     def bars(self, n: int = 60):

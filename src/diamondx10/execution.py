@@ -134,6 +134,40 @@ def _order_type(mt5, action):
     return getattr(mt5, "ORDER_TYPE_SELL", MT5_ORDER_TYPE_SELL)
 
 
+def check_margin(mt5, symbol, volume, price, account_info=None):
+    """Kiem tra ky quy kha dung truoc khi gui lenh (Q3, Phase 4).
+
+    - mt5 co order_check: goi order_check voi request tuong tu lenh that;
+      retcode 0 = du ky quy, khac 0 = khong du (ghi retcode vao message).
+    - mt5 la None hoac khong co order_check (che do mo phong): bo qua,
+      tra (True, ...) voi ghi chu ro rang.
+    Tra (ok, message). Khong bao gio raise — place_demo_order quyet dinh.
+    """
+    if mt5 is None or not hasattr(mt5, "order_check"):
+        return True, "bo qua kiem tra ky quy o che do mo phong (khong co MT5)"
+    request = {
+        "action": getattr(mt5, "TRADE_ACTION_DEAL", 1),
+        "symbol": symbol,
+        "volume": float(volume),
+        "type": getattr(mt5, "ORDER_TYPE_BUY", MT5_ORDER_TYPE_BUY),
+        "price": float(price),
+        "sl": 0.0,
+        "tp": 0.0,
+        "deviation": 20,
+        "magic": 20261126,
+        "comment": "DiamondX10 DEMO margin check",
+        "type_time": getattr(mt5, "ORDER_TIME_GTC", 0),
+        "type_filling": getattr(mt5, "ORDER_FILLING_IOC", 1),
+    }
+    result = mt5.order_check(request)
+    if result is None:
+        return False, "khong kiem tra duoc ky quy (order_check tra ve None)"
+    retcode = getattr(result, "retcode", None)
+    if retcode == 0:
+        return True, "du ky quy"
+    return False, f"khong du ky quy: order_check retcode={retcode}"
+
+
 def place_demo_order(mt5, *, symbol, action, volume, price, sl, tp=None,
                      desk, manager, cfg=None, account_info=None, server=None,
                      dry_run=False, comment="DiamondX10 DEMO"):
@@ -172,6 +206,16 @@ def place_demo_order(mt5, *, symbol, action, volume, price, sl, tp=None,
         log_decision(symbol, f"DRY-RUN-{action}", reason + " [dry-run, khong gui lenh]",
                      desk=desk, manager=manager)
         return {"status": "DRY_RUN", "request": request, "order": None}
+    # Kiem tra ky quy (Q3, Phase 4): SAU chan DEMO-ONLY, TRUOC order_send.
+    # Che do mo phong (khong co MT5/order_check) thi bo qua va ghi ro vao log.
+    margin_ok, margin_msg = check_margin(mt5, symbol, volume, price, account_info)
+    if not margin_ok:
+        raise RuntimeError(
+            f"Khong du ky quy de dat lenh demo {symbol} {action} "
+            f"{volume} lot @ {price}: {margin_msg}"
+        )
+    if margin_msg.startswith("bo qua"):
+        reason += f" [ky quy: {margin_msg}]"
     result = mt5.order_send(request)
     if result is None:
         raise RuntimeError(f"MT5 order_send tra ve None. Loi MT5: {mt5.last_error()}")
@@ -185,7 +229,8 @@ def place_demo_order(mt5, *, symbol, action, volume, price, sl, tp=None,
     log_decision(symbol, action, reason + f" [order {getattr(result, 'order', '')}]",
                  desk=desk, manager=manager)
     return {"status": "SENT", "request": request,
-            "order": getattr(result, "order", None), "retcode": retcode}
+            "order": getattr(result, "order", None), "retcode": retcode,
+            "margin_check": margin_msg}
 
 
 def check_symbols_available(mt5, symbols):

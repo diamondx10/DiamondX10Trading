@@ -5,3 +5,6 @@ pytest>=8.0
 # MetaTrader5: TUY CHON, chi khi chay MT5 demo tren Windows.
 # Khong cai o day (Linux khong chay duoc MT5 terminal):
 #   pip install MetaTrader5
+# Web UI (xem docs/web-ui.md): chi dung cho giao dien web React + FastAPI.
+fastapi>=0.110
+uvicorn>=0.29

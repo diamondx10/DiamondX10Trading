@@ -37,10 +37,12 @@ class FakeMT5:
         self._trade_mode = trade_mode
         self._server = server
         self.sent_orders = []
-        self._rates = [{"time": 1700000000 + i * 900, "close": 100.0 + i}
+        self._rates = [{"time": 1700000000 + i * 900,
+                        "open": 99.5 + i, "high": 100.5 + i,
+                        "low": 99.0 + i, "close": 100.0 + i}
                        for i in range(10)]
 
-    def initialize(self):
+    def initialize(self, path=None):
         return True
 
     def login(self, login, password=None, server=None):
@@ -89,10 +91,45 @@ def test_feed_bar_conversion():
     feed = MT5Feed("EURUSD", login=123, password="demo-pass",
                    server="Exness-MT5Trial7", mt5_module=FakeMT5())
     bars = feed.bars(3)
-    assert bars == [{"time": 1700006300, "close": 107.0},
-                    {"time": 1700007200, "close": 108.0},
-                    {"time": 1700008100, "close": 109.0}]
+    assert bars == [{"time": 1700006300, "open": 106.5, "high": 107.5,
+                     "low": 106.0, "close": 107.0},
+                    {"time": 1700007200, "open": 107.5, "high": 108.5,
+                     "low": 107.0, "close": 108.0},
+                    {"time": 1700008100, "open": 108.5, "high": 109.5,
+                     "low": 108.0, "close": 109.0}]
     assert feed.latest_price("EURUSD") == 101.5
+
+
+def test_rate_to_bar_tuple_style():
+    # Tuple theo thu tu MT5: (time, open, high, low, close, tick_volume,
+    # spread, real_volume) — dang ma copy_rates_from_pos tra ve khi
+    # dung kieu numpy record / tuple.
+    from diamondx10.data.mt5_feed import _rate_to_bar
+    bar = _rate_to_bar((1700000000, 100.0, 101.0, 99.0, 100.5, 10, 2, 0))
+    assert bar == {"time": 1700000000, "open": 100.0, "high": 101.0,
+                   "low": 99.0, "close": 100.5}
+
+
+def test_rate_to_bar_attribute_style():
+    from diamondx10.data.mt5_feed import _rate_to_bar
+    rate = SimpleNamespace(time=1700000000, open=100.0, high=101.0,
+                           low=99.0, close=100.5)
+    assert _rate_to_bar(rate) == {"time": 1700000000, "open": 100.0,
+                                  "high": 101.0, "low": 99.0,
+                                  "close": 100.5}
+
+
+def test_mt5_bars_ohlc_invariants_and_time_order():
+    feed = MT5Feed("EURUSD", login=123, password="demo-pass",
+                   server="Exness-MT5Trial7", mt5_module=FakeMT5())
+    bars = feed.bars(10)
+    assert len(bars) == 10
+    times = [b["time"] for b in bars]
+    assert times == sorted(times) and len(set(times)) == len(times)
+    for b in bars:
+        assert set(b) == {"time", "open", "high", "low", "close"}
+        assert b["high"] >= max(b["open"], b["close"])
+        assert b["low"] <= min(b["open"], b["close"])
 
 
 def test_feed_symbol_not_found():
