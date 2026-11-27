@@ -1,7 +1,7 @@
 """CLI entry: python3 -m diamondx10 demo | backtest | signals | compare
 | sweep | import-bars | mt5-dry-run | mt5-trade | mt5-symbols
 | backfill | export-bars | live | telegram-listen | telegram-test
-| briefing | verdict | synthesize | muse-setup | muse-send | muse-auto.
+| briefing | verdict | synthesize | publish-post | muse-setup | muse-send | muse-auto.
 | live.
 
 Lenh mt5-* va live CHI dung voi tai khoan DEMO (Exness demo + MT5 terminal).
@@ -61,6 +61,7 @@ from .live import (
     split_desk_capital,
 )
 from .portfolio import Portfolio
+from .posts import cmd_publish_post
 from .report import build_report, format_report
 from .signals import generate_signals
 from .strategies import STRATEGIES, build_strategies, build_strategy
@@ -774,6 +775,33 @@ def main(argv=None):
     sy.add_argument("--desk", default="forex")
     sy.add_argument("--symbol", default=None,
                     help="chi tong hop 1 symbol cua desk (mac dinh: tat ca)")
+    sy.add_argument("--publish", action="store_true",
+                    help="dang them 1 bai phan tich / symbol len feed "
+                         "trang chu (BUY/SELL thi gui tom tat Telegram)")
+    pp = sub.add_parser("publish-post",
+                        help="dang 1 bai phan tich thu cong len feed "
+                             "trang chu (BUY/SELL thi gui tom tat Telegram)")
+    pp.add_argument("--desk", required=True,
+                    help="desk: forex | xauusd | crypto | us_securities")
+    pp.add_argument("--symbol", required=True,
+                    help="symbol cua bai dang (vd EURUSD)")
+    pp.add_argument("--action", required=True,
+                    choices=["BUY", "SELL", "NEUTRAL"],
+                    help="ket luan cua bai dang")
+    pp.add_argument("--summary", required=True,
+                    help="tom tat 1-3 cau ve ket luan")
+    pp.add_argument("--confidence", type=float, default=0.0,
+                    help="do tin cay 0..1 (mac dinh 0.0)")
+    pp.add_argument("--entry", type=float, default=None,
+                    help="gia vao (tuy chon)")
+    pp.add_argument("--sl", type=float, default=None,
+                    help="stop loss (tuy chon)")
+    pp.add_argument("--tp", type=float, default=None,
+                    help="take profit (tuy chon)")
+    pp.add_argument("--drivers", default=None,
+                    help="ly do chinh, cach nhau bang ';' (tuy chon)")
+    pp.add_argument("--risks", default=None,
+                    help="rui ro, cach nhau bang ';' (tuy chon)")
     y = sub.add_parser("mt5-symbols",
                        help="DEMO: kiem tra symbol nao co tren server MT5 demo")
     y.add_argument("--desk", default=None)
@@ -1093,7 +1121,13 @@ def main(argv=None):
     elif args.cmd == "verdict":
         return cmd_verdict(cfg, args.file)
     elif args.cmd == "synthesize":
-        return cmd_synthesize(cfg, args.desk, args.symbol)
+        return cmd_synthesize(cfg, args.desk, args.symbol,
+                              publish=args.publish)
+    elif args.cmd == "publish-post":
+        return cmd_publish_post(cfg, args.desk, args.symbol, args.action,
+                                args.summary, confidence=args.confidence,
+                                entry=args.entry, sl=args.sl, tp=args.tp,
+                                drivers=args.drivers, risks=args.risks)
     elif args.cmd in ("mt5-dry-run", "mt5-trade"):
         mode = "DRY-RUN" if args.cmd == "mt5-dry-run" else "TRADE"
         symbols = _desk_symbols(cfg, args.desk, args.symbol)

@@ -6,7 +6,7 @@ cho Muse, nap verdict, xem tin + backtest + bieu do nen — tat ca tu
 trinh duyet, khong can go lenh CLI.
 
 > Da doi chieu 2026-11-27: danh sach endpoint o muc 4 khop 1-1 voi route
-> table trong `src/diamondx10/webapi.py` (28 route).
+> table trong `src/diamondx10/webapi.py` (31 route).
 
 ## 1. Chay
 
@@ -80,7 +80,7 @@ Goc: `http://127.0.0.1:8000`. Tat ca tra JSON.
 |---|---|---|
 | GET | `/api/status` | Trang thai quy: von, drawdown, kill switch, MT5, Telegram, live/listener co dang chay khong |
 | GET | `/api/positions` | Vi the dang mo |
-| GET | `/api/signals?desk=` | Tin hieu TA moi nhat theo desk (`forex` / `gold` / `crypto` / `securities`) |
+| GET | `/api/signals?desk=` | Tin hieu TA moi nhat theo desk (`forex` / `xauusd` / `crypto` / `us_securities`) |
 | GET | `/api/synthesis?desk=` | Tong hop TA+PTCB theo desk (ma tran Yuling, quy tac 39) |
 | GET | `/api/pending` | Danh sach lenh cho |
 | POST | `/api/pending/{id}/place` | Dat lenh cho (duyet) |
@@ -105,6 +105,9 @@ Goc: `http://127.0.0.1:8000`. Tat ca tra JSON.
 | GET | `/api/language` | Ngon ngu giao dien hien tai (`vi` \| `en`) |
 | POST | `/api/language` | Doi ngon ngu (`{"language": "vi" \| "en"}`) |
 | GET | `/api/team-news` | Tin doi da phan tich trang chu (xem muc 7) |
+| GET | `/api/posts?limit=&desk=` | Feed bai dang phan tich, moi nhat len dau; `limit` mac dinh 20, kep 1–200; `desk` tuy chon (`forex` / `xauusd` / `crypto` / `us_securities`); tra `{"posts": [...]}` (xem muc 8) |
+| POST | `/api/posts` | Dang 1 bai phan tich thu cong (composer); body `{desk, symbol, action, summary, confidence?, entry?, sl?, tp?, drivers?, risks?}`; 201 tra `{"post": {...}}`; thieu/sai truong → 400 (xem muc 8) |
+| POST | `/api/publish` | Chay tong hop Yuling + dang 1 bai / symbol; body `{desk?, symbol?}` (mac dinh `desk=forex`, tat ca symbol cua desk); tra `{"posts": [...]}` chi bai MOI tao (bai da co do dedupe khong nam trong danh sach); desk sai → 400; tong hop loi → 500 (xem muc 8) |
 
 ## 5. Lam duoc / khong lam duoc
 
@@ -112,6 +115,9 @@ Lam duoc:
 
 - Xem trang thai, vi the, tin hieu, tong hop, tin tuc, backtest,
   bieu do nen, lich su quyet dinh.
+- Xem + dang bai phan tich tren feed trang chu (muc 8): moi bai deu
+  co ket luan BUY/SELL/NEUTRAL; bai BUY/SELL thi gui tom tat qua
+  Telegram, bai NEUTRAL thi khong gui.
 - Doi ngon ngu giao dien Anh/Viet (muc 7) va xem tin doi da phan
   tich o trang chu (muc 7).
 - Duyet / bo lenh cho; bat tat kill switch; bat tat vong live va
@@ -188,10 +194,124 @@ Trang chu hien muc tin cua doi qua 1 endpoint gop
   list rong / `null`, khong bao gio loi — muc tin chi hien "chua co
   du lieu".
 
+## 8. Feed bai dang phan tich o trang chu (quy tac 53–54)
+
+Trang chu (tab Overview) la **feed kieu Facebook**: ket qua phan
+tich cua doi dang len nhu bai dang, moi nhat len dau, moi bai deu
+mang 1 ket luan. Code: `webui/src/components/Feed.tsx`
+(`AnalysisFeed`: composer + post card + feed), `Overview.tsx` dat
+feed vao trang chu, `webui/src/api.ts` (`Post` / `PostCreate`,
+`fetchPosts` / `createPost` / `publishPosts`), `webui/src/i18n.tsx`
+(30 khoa `feed.*`, ca `vi` + `en`), `webui/src/styles.css` (style
+feed). Backend: `src/diamondx10/posts.py` (`PostStore`),
+`src/diamondx10/telegram.py` (`format_post_summary`),
+`src/diamondx10/webapi.py` (3 endpoint muc 4).
+
+### Bo cuc trang chu (feed-first)
+
+Thu tu tu tren xuong trong `Overview.tsx`:
+
+1. Day thong tin quy (4 the: Equity + von, drawdown + gauge, so vi
+   the dang mo, trang thai MT5 / Telegram / Live / Listener).
+2. **Feed** — cot giua toi da **680px** (`.feed-column`:
+   `max-width: 680px; margin: 0 auto`), composer o tren cung, duoi
+   la danh sach bai dang.
+3. Muc "Tin team da phan tich" (`TeamNewsSection`, muc 7).
+4. Kill switch, dieu khien live/listener, von theo desk.
+
+### Composer — dang bai thu cong
+
+Thanh composer luc dau chi la 1 dong mo (`feed.composerPlaceholder`,
+avatar "DX"); bam vao thi mo form day du:
+
+- **Desk** (select, mac dinh `forex`), **symbol** (text, tu viet
+  hoa khi gui), **ket luan** (3 nut chon: MUA / BAN / CHO — mac dinh
+  CHO/NEUTRAL), **tom tat** (1–3 cau ve ket luan).
+- Tuy chon: **do tin cay %** (0–100, doi sang 0..1 khi gui, kep
+  trong 0..100), **entry / SL / TP** (so, tuy chon), **drivers /
+  risks** (moi dong 1 muc).
+- Kiem tra (validation): thieu **symbol hoac tom tat** thi bao loi
+  ngay tren form (`feed.validation`), khong goi API. Gui len
+  `POST /api/posts`; backend thieu/sai truong (desk la, action la,
+  confidence ngoai 0..1, drivers/risks khong phai list chuoi) thi
+  tra 400 va form hien loi do. Dang xong thi bai moi chen len dau
+  feed, form dong + reset, hien `feed.posted`.
+
+### Bai dang (post card) — giai phau 1 bai
+
+- **Dau bai:** avatar tron (2 chu cai dau ten analyst, nen mau theo
+  desk) + ten analyst + desk + thoi gian tuong doi (`Vua xong` /
+  `{n} phut truoc` / `{n} gio truoc` / `{n} ngay truoc`) + **badge
+  ket luan** ben phai (MUA xanh / BAN do / CHO xam; tieng Anh:
+  BUY / SELL / WAIT).
+- **Than bai:** dong symbol (vd `EURUSD`), tom tat ket luan.
+- **Hang so chinh** (chi hien khi co it nhat 1 so): entry / SL / TP
+  / do tin cay %. Bai NEUTRAL hoac bi chan thi khong co entry/SL/TP.
+- **Chi tiet mo rong:** neu co drivers/risks thi co nut `Xem them`
+  / `Thu gon` mo list drivers + risks.
+- **Chan bai:** desk + nguon (`Tong hop TA+FA` neu `source` la
+  `synthesis`, `Dang tay` neu `manual`) + thoi gian verdict neu co
+  (`Verdict: {thoi gian tuong doi}`).
+
+Truong bai dang (backend `PostStore`, luu o
+`decisions/analysis-posts.json` — file runtime, da gitignore):
+
+`id` (8 ky hex) | `created_utc` | `desk` | `analyst` | `symbol` |
+`action` (`BUY` | `SELL` | `NEUTRAL`) | `confidence` (0..1) |
+`summary` | `drivers` / `risks` (list chuoi) | `entry` / `sl` /
+`tp` (so hoac null) | `source` (`synthesis` | `manual`) |
+`verdict_created_utc` (null neu khong tu verdict).
+
+Feed co **nut loc theo desk** (Tat ca + 4 desk), nut **Refresh**,
+va nut **"Dang tu tong hop"** goi `POST /api/publish` voi desk
+dang loc (loc Tat ca thi khong gui desk, backend mac dinh
+`desk=forex`); thong bao tra ve cho biet da dang bao nhieu bai MOI
+(`feed.publishDone`). **Khong co** like / comment / reaction /
+stories — feed chi de doc + dang ket luan phan tich.
+
+### Quy tac Telegram — BUY/SELL gui tom tat, NEUTRAL khong gui
+
+Moi bai dang co ket luan (quy tac 53). Khi bai **BUY hoac SELL**
+duoc dang, backend gui **1 tin tom tat qua Telegram**
+(`telegram.py` `format_post_summary`, qua `PostStore._notify`,
+chi khi `telegram.enabled: true`): tieu de phan tich + symbol +
+ket luan, desk + analyst, entry / SL / TP (neu co), do tin cay,
+tom tat. Bai **NEUTRAL khong gui gi**. Tin chi la **thong tin**:
+khong kem nut dat lenh, khong tao lenh cho — muon dat lenh thi
+dung duong khuyen nghi live / nut Telegram o `docs/live-loop.md`
+§6, khong phai tu bai dang. Gui loi thi chi in canh bao, khong bao
+gio lam hong viec dang bai. Ngon ngu tin theo lua chon cua user
+(quy tac 44, 51); luu y cac chuoi `tg.*` tieng Viet trong
+`src/diamondx10/i18n.py` **co dau** (theo thoi quen cu cua tin
+Telegram), khac voi CLI/console/log tieng Viet khong dau.
+
+**Dedupe (quy tac 54):** bai tu tong hop (`source: synthesis`)
+duoc dedupe theo symbol + action + `verdict_created_utc` — neu bai
+moi nhat cua cung symbol co cung ket luan VA cung thoi gian verdict
+thi tra lai bai cu, khong tao bai moi, khong gui Telegram lai.
+Bai dang tay (`publish-post` / composer / `POST /api/posts`)
+luon tao bai moi, khong dedupe.
+
+**Khong trung lap voi vong live:** vong live **khong** dang bai
+phan tich va **khong** gui tom tat bai dang — 2 duong Telegram
+(khuyen nghi live dat lenh DEMO, tom tat bai phan tich) tach biet,
+khong co double-send (xem `docs/live-loop.md` §4).
+
+### Tham chieu thiet ke — Kinfolk
+
+Bo cuc feed (composer o tren, cot giua la cac post card: avatar +
+ten + thoi gian, than bai, hang so, chi tiet mo rong, chan bai)
+tham khao **Kinfolk** — ban Facebook clone ma nguon mo cua
+suhasbhairav (github.com/suhasbhairav/facebook-clone, **giay phep
+MIT**). Chi lay y tuong bo cuc; **khong copy code, khong them
+dependency** — feed dx10 viet bang React + token thiet ke Apple-style
+san co cua dx10, khong dung Next.js/Tailwind cua Kinfolk.
+
 ## Tai lieu lien quan
 
 - `docs/trading-principles.md` quy tac 47–48 (web UI, UI dung
-  lai kiem tra cua backend), quy tac 51–52 (song ngu + tin doi).
+  lai kiem tra cua backend), quy tac 51–52 (song ngu + tin doi),
+  quy tac 53–54 (feed bai dang phan tich + dedupe + Telegram).
 - `docs/dx10-flow.md` — flow van hanh 24/7 (live + listener).
 - `docs/live-loop.md` §6 — che do khuyen nghi + nut dat lenh.
 - `docs/muse-browser.md` — gui briefing cho Muse qua trinh duyet.

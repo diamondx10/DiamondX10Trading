@@ -333,6 +333,38 @@ def format_signal_alert(result, desk, manager=None, recommended=False,
     return "\n".join(lines)
 
 
+def format_post_summary(post, lang=None, cfg=None):
+    """Tom tat 1 bai phan tich de gui qua Telegram (CHI THONG TIN).
+
+    post: dict bai dang (co desk/analyst/symbol/action/confidence/
+    summary/entry/sl/tp). Chi goi cho bai BUY/SELL (NEUTRAL khong
+    gui — posts.PostStore.publish_post tu kiem tra). Tin ngan gon,
+    KHONG kem nut dat lenh (khong tao lenh cho tu bai dang).
+
+    lang: "vi" | "en" (uu tien); khong truyen thi doc config qua
+    get_language (mac dinh "vi"). Ban tieng Anh giu NGUYEN nhu cu.
+    """
+    lang = resolve_language(lang, cfg)
+    symbol = post.get("symbol", "?")
+    action = post.get("action", "?")
+    lines = [t("tg.post_header", lang, symbol=symbol, action=action)]
+    lines.append(t("tg.post_desk", lang, desk=post.get("desk", "?"),
+                   analyst=post.get("analyst", "?")))
+    if post.get("entry") is not None:
+        lines.append(t("tg.entry", lang,
+                       value=_fmt_number(post.get("entry"))))
+    if post.get("sl") is not None or post.get("tp") is not None:
+        lines.append(t("tg.sl_tp", lang,
+                       sl=_fmt_number(post.get("sl")),
+                       tp=_fmt_number(post.get("tp"))))
+    if post.get("confidence") is not None:
+        lines.append(t("tg.post_confidence", lang,
+                       value=f"{float(post['confidence']):g}"))
+    if post.get("summary"):
+        lines.append(t("tg.post_summary", lang, value=post["summary"]))
+    return "\n".join(lines)
+
+
 def format_blocked_alert(result, desk, manager=None, lang=None,
                          cfg=None):
     """Tin canh bao khi lenh bi chan (BLOCKED-*).

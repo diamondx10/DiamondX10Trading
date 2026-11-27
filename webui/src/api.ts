@@ -16,6 +16,57 @@ export interface TeamNewsVerdict { direction: string; confidence: number | null 
 export interface TeamNewsBriefing { desk: string; file: string; time: string }
 export interface TeamNews { items: TeamNewsItem[]; verdicts: Record<string, TeamNewsVerdict | null>; briefings: TeamNewsBriefing[] }
 
+// Analysis feed (homepage): GET /api/posts, POST /api/posts, POST /api/publish.
+// Every post carries a conclusion (action BUY/SELL/NEUTRAL). The backend
+// sends a Telegram summary whenever the conclusion is BUY or SELL.
+export interface Post {
+  id: string
+  created_utc: string
+  desk: string
+  analyst: string
+  symbol: string
+  action: 'BUY' | 'SELL' | 'NEUTRAL'
+  confidence: number | null
+  summary: string
+  drivers: string[]
+  risks: string[]
+  entry: number | null
+  sl: number | null
+  tp: number | null
+  source: string
+  verdict_created_utc: string | null
+}
+export interface PostsResponse { posts: Post[] }
+export interface PostCreate {
+  desk: string
+  symbol: string
+  action: string
+  summary: string
+  confidence?: number | null
+  entry?: number | null
+  sl?: number | null
+  tp?: number | null
+  drivers?: string[]
+  risks?: string[]
+}
+
+export async function fetchPosts(limit = 20, desk?: string): Promise<PostsResponse> {
+  const q = new URLSearchParams({ limit: String(limit) })
+  if (desk) q.set('desk', desk)
+  return apiGet<PostsResponse>(`/api/posts?${q.toString()}`)
+}
+
+export async function createPost(body: PostCreate): Promise<{ post: Post }> {
+  return apiPost<{ post: Post }>('/api/posts', body)
+}
+
+export async function publishPosts(desk?: string, symbol?: string): Promise<PostsResponse> {
+  const body: Record<string, string> = {}
+  if (desk) body.desk = desk
+  if (symbol) body.symbol = symbol
+  return apiPost<PostsResponse>('/api/publish', body)
+}
+
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = `HTTP ${res.status}`
@@ -39,8 +90,8 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return handle<T>(res)
 }
 
-export const DESKS = ['forex', 'gold', 'crypto', 'securities'] as const
-export const DESK_LABELS: Record<string, string> = { forex: 'Forex', gold: 'Gold', crypto: 'Crypto', securities: 'Securities' }
+export const DESKS = ['forex', 'xauusd', 'crypto', 'us_securities'] as const
+export const DESK_LABELS: Record<string, string> = { forex: 'Forex', xauusd: 'Gold', crypto: 'Crypto', us_securities: 'Securities' }
 
 export function fmtNum(v: number | null | undefined, digits = 2): string {
   if (v === null || v === undefined || Number.isNaN(v)) return '—'

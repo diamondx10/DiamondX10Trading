@@ -10,6 +10,7 @@ decisions/equity-state.json
 decisions/kill-switch.json
 decisions/audit-log.jsonl
 decisions/fundamental-verdicts.json
+decisions/analysis-posts.json
 decisions/pending-orders.json
 decisions/fa-cycle-state.json
 decisions/synthesis-*.json

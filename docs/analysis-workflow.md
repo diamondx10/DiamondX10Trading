@@ -168,6 +168,64 @@ synthesis:
   fa_high_confidence: 0.6     # nguong tin cay cao (dong thuan manh / mau thuan manh)
 ```
 
+### Dang bai phan tich len feed trang chu (`synthesize --publish`)
+
+Ket luan tong hop khong chi in ra console — no duoc **dang len
+feed trang chu** nhu bai dang Facebook (quy tac 53–54, xem
+`docs/web-ui.md` §8):
+
+```bash
+python -m diamondx10 synthesize --desk forex --publish
+```
+
+Voi `--publish`, moi symbol cua desk duoc dang them 1 bai
+(`posts.py` `publish_synthesis_post`, luu vao kho
+`decisions/analysis-posts.json` — file runtime, da gitignore):
+
+- Ket luan bai dang: PTKT BUY/SELL ma khong bi chan -> **BUY/SELL**;
+  PTKT HOLD hoac bi chan (BLOCKED) -> **NEUTRAL**, khong co
+  entry/SL/TP.
+- Tom tat bai gom 1–3 cau: cau PTKT (huong + ly do) + cau PTCB
+  (huong + do tin cay, kem drivers/risks neu co) + cau muc gia
+  (entry/SL/TP, chi khi BUY/SELL) hoac cau chan lenh (khi bi chan).
+- Confidence/drivers/risks lay tu verdict (neu co); entry/SL/TP
+  lay tu levels TA (chi khi BUY/SELL).
+- **Telegram:** bai BUY/SELL moi thi gui 1 tin tom tat qua
+  Telegram (`telegram.py` `format_post_summary`, chi khi
+  `telegram.enabled: true`); bai NEUTRAL khong gui. Tin chi la
+  thong tin — khong nut dat lenh, khong tao lenh cho. Gui loi chi
+  in canh bao, khong lam hong viec dang bai.
+- **Dedupe:** cung symbol + cung ket luan + cung
+  `verdict_created_utc` thi tra lai bai cu, khong tao bai moi,
+  khong gui Telegram lai. Loi dang bai chi in canh bao, khong lam
+  hong ket qua tong hop (exit code van theo tong hop).
+
+Hai duong dang bai khac (cung kho, cung quy tac Telegram):
+
+- **Dang tay qua CLI** — `publish-post` (luon tao bai moi, khong
+  dedupe):
+
+  ```bash
+  python -m diamondx10 publish-post --desk xauusd --symbol XAUUSD \
+    --action BUY --summary "PTKT BUY, RSI 59, PTCB buy 0.8." \
+    --confidence 0.8 --entry 3650 --sl 3600 --tp 3750 \
+    --drivers "Fed cat lai suat;USD yeu di" --risks "ECB ran lai"
+  ```
+
+  `--desk` / `--symbol` / `--action` / `--summary` bat buoc;
+  `--confidence` (0..1, mac dinh 0.0), `--entry` / `--sl` /
+  `--tp`, `--drivers` / `--risks` (1 chuoi, cac muc cach nhau
+  bang `;`) tuy chon. Sai thi bao loi sach, exit 1, khong dang gi.
+- **Dang tay qua web UI** — composer tren feed trang chu
+  (`POST /api/posts`, xem `docs/web-ui.md` §8) hoac nut
+  **"Dang tu tong hop"** (`POST /api/publish`, chay lai tong hop
+  Yuling roi dang bai moi — giong `synthesize --publish` nhung goi
+  tu trinh duyet; tra chi bai MOI tao).
+
+Vong live **khong** dang bai: `live.py` khong goi `PostStore`
+(xem `docs/live-loop.md` §4) — tom tat bai phan tich va khuyen
+nghi live la 2 duong Telegram rieng, khong double-send.
+
 ## 4. Cong PTCB trong vong live
 
 Sau khi tinh xong tin hieu + volume, truoc khi dat lenh DEMO,
@@ -189,6 +247,8 @@ tran muc 3 (xem `docs/live-loop.md` §5):
 python -m diamondx10 briefing --desk forex     # briefing truoc phien
 python -m diamondx10 verdict --file verdict-forex.json
 python -m diamondx10 synthesize --desk forex   # xem tong hop Yuling
+python -m diamondx10 synthesize --desk forex --publish  # tong hop + dang bai len feed
+python -m diamondx10 publish-post --desk forex --symbol EURUSD --action BUY --summary "..."  # dang bai tay
 python -m diamondx10 live --once --desk forex  # vong live (co cong PTCB)
 python -m diamondx10 live --once --recommend-only --desk forex  # chi gui khuyen nghi
 python -m diamondx10 telegram-listen   # nhan nut "Dat lenh" tren Telegram
@@ -208,8 +268,18 @@ python -m diamondx10 telegram-listen   # nhan nut "Dat lenh" tren Telegram
 - `src/diamondx10/pending.py` — `PendingOrderStore` (lenh cho xac nhan).
 - `src/diamondx10/listener.py` — `run_listener` (long-poll nut bam
   Telegram, dat lenh DEMO theo lenh cho).
-- `src/diamondx10/telegram.py` — `order_keyboard`, `get_updates`,
-  `answer_callback_query`, `edit_message_text`.
+- `src/diamondx10/posts.py` — `PostStore` (kho
+  `decisions/analysis-posts.json`), `publish_synthesis_post`,
+  `cmd_publish_post` (lenh `publish-post`); dedupe bai tong hop,
+  Telegram chi cho BUY/SELL.
+- `src/diamondx10/telegram.py` — `format_post_summary` (tom tat bai
+  dang, chi thong tin, khong nut dat lenh); `order_keyboard`,
+  `get_updates`, `answer_callback_query`, `edit_message_text`
+  (khuyen nghi live + nut dat lenh).
+- `src/diamondx10/webapi.py` — `GET /api/posts`, `POST /api/posts`,
+  `POST /api/publish` (xem `docs/web-ui.md` §8).
+- `tests/test_posts.py`, `tests/test_posts_api.py` — kho bai dang,
+  dedupe, Telegram chi BUY/SELL, 3 endpoint posts.
 - `tests/test_patterns.py`, `tests/test_briefing.py`,
   `tests/test_synthesis.py`, `tests/test_live_fa.py`,
   `tests/test_pending.py`, `tests/test_telegram_keyboard.py`,

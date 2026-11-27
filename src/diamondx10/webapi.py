@@ -69,8 +69,10 @@ from .listener import place_pending_order
 from .models.quant import atr as _atr
 from .models.quant import rsi as _rsi
 from .pending import PendingOrderStore
+from .posts import PostStore
 from .signals import generate_signals
 from .synthesis import (
+    cmd_synthesize,
     load_verdict,
     load_verdicts,
     save_verdict,
@@ -895,6 +897,94 @@ def create_app(static_dir=None):
             "verdicts": verdicts_out,
             "briefings": briefings,
         }
+
+    # --- Bai dang phan tich (feed trang chu) ---
+
+    @app.get("/api/posts")
+    def api_posts(limit: int = 20, desk: str = None):
+        """Feed bai dang phan tich, moi nhat len dau.
+
+        ?limit=N (mac dinh 20, toi da 200) &desk=forex (tuy chon).
+        Kho thieu/hong thi tra danh sach rong — khong bao gio raise.
+        """
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 20
+        limit = max(1, min(limit, 200))
+        store = PostStore()
+        return {"posts": store.list_posts(limit=limit, desk=desk)}
+
+    @app.post("/api/posts")
+    def api_posts_create(payload: dict):
+        """Dang 1 bai phan tich thu cong (composer o web UI).
+
+        Body: {desk, symbol, action, summary, confidence?, entry?,
+        sl?, tp?, drivers?, risks?}. Thieu truong bat buoc hoac
+        action la thi 400. Bai BUY/SELL thi gui tom tat qua Telegram
+        (chi khi telegram.enabled = true); NEUTRAL khong gui.
+        """
+        cfg = _load_cfg()
+        payload = payload or {}
+        desk = payload.get("desk")
+        symbol = payload.get("symbol")
+        action = payload.get("action")
+        summary = payload.get("summary")
+        for field, value in (("desk", desk), ("symbol", symbol),
+                             ("action", action), ("summary", summary)):
+            if not isinstance(value, str) or not value.strip():
+                raise HTTPException(
+                    status_code=400, detail=f"thieu truong '{field}'")
+        if (not isinstance(action, str)
+                or action.strip().upper() not in ("BUY", "SELL", "NEUTRAL")):
+            raise HTTPException(
+                status_code=400,
+                detail="action phai la BUY | SELL | NEUTRAL")
+        drivers = payload.get("drivers")
+        risks = payload.get("risks")
+        for field, value in (("drivers", drivers), ("risks", risks)):
+            if value is not None and not isinstance(value, list):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"truong '{field}' phai la list cac chuoi")
+        try:
+            post, _created = PostStore().publish_post(
+                desk=desk.strip(), symbol=symbol, action=action,
+                summary=summary, confidence=payload.get("confidence", 0.0),
+                drivers=drivers, risks=risks, entry=payload.get("entry"),
+                sl=payload.get("sl"), tp=payload.get("tp"),
+                source="manual", cfg=cfg)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return JSONResponse(status_code=201, content={"post": post})
+
+    @app.post("/api/publish")
+    def api_publish(payload: dict = None):
+        """Chay tong hop Yuling + dang bai phan tich cho 1 desk/symbol.
+
+        Body: {desk?, symbol?} (mac dinh desk=forex, tat ca symbol cua
+        desk). Tra {"posts": [...bai MOI tao...]} — bai da co do
+        dedupe thi khong nam trong danh sach. Tong hop loi thi 500.
+        """
+        cfg = _load_cfg()
+        payload = payload or {}
+        desk = payload.get("desk") or "forex"
+        symbol = payload.get("symbol")
+        if desk not in BRIEFING_DESKS:
+            raise HTTPException(
+                status_code=400, detail=f"desk khong hop le: {desk!r}")
+        store = PostStore()
+        before = {post["id"]
+                  for post in store.list_posts(limit=1000)}
+        rc = cmd_synthesize(cfg, desk, symbol, publish=True,
+                            post_store=store)
+        if rc != 0:
+            raise HTTPException(
+                status_code=500,
+                detail="khong tong hop/dang bai duoc — xem log server")
+        after = store.list_posts(limit=1000)
+        created = [post for post in after if post["id"] not in before]
+        return {"posts": created}
 
     # --- Tin / backtest / bar ---
 

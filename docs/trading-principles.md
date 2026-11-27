@@ -641,6 +641,36 @@
     `decisions/fundamental-verdicts.json`); `briefings`: file
     briefing moi nhat moi desk (`{desk, file, time}`). Thieu du lieu
     thi tra list rong / null, khong bao gio traceback.
+53. **[ĐÃ CÓ — 2026-11-27] Bai dang phan tich: moi bai deu mang 1
+    ket luan; BUY/SELL thi gui tom tat qua Telegram, NEUTRAL thi
+    khong gui** (`posts.py` `PostStore`, `telegram.py`
+    `format_post_summary`, xem `docs/web-ui.md` §8,
+    `docs/analysis-workflow.md` §3): moi bai dang tren feed trang
+    chu deu co `action` BUY | SELL | NEUTRAL — khong co bai dang
+    nao khong co ket luan. Bai BUY/SELL moi duoc dang thi gui 1 tin
+    tom tat qua Telegram (chi khi `telegram.enabled: true`): tieu
+    de + symbol + ket luan, desk + analyst, entry/SL/TP (neu co),
+    do tin cay, tom tat; tin chi la thong tin — khong nut dat lenh,
+    khong tao lenh cho. Bai NEUTRAL khong gui gi. Gui loi chi in
+    canh bao, khong bao gio lam hong viec dang bai. Vong live
+    KHONG dang bai va KHONG gui tom tat bai dang — 2 duong Telegram
+    (khuyen nghi live, tom tat bai phan tich) tach biet, khong co
+    double-send (xem `docs/live-loop.md` §4).
+54. **[ĐÃ CÓ — 2026-11-27] Feed bai dang la trang chu; bai dang la
+    goc nhin da xuat ban cua doi, moi nhat len dau; dedupe bai
+    tong hop** (`webui/src/components/Feed.tsx`,
+    `src/diamondx10/posts.py`, xem `docs/web-ui.md` §8): tab
+    Overview mo len la feed (composer o tren, danh sach bai duoi),
+    bai moi nhat len dau, loc duoc theo desk. Kho bai dang la
+    `decisions/analysis-posts.json` (file runtime, da gitignore;
+    thieu/hong thi doc nhu kho rong). Dedupe: bai tu tong hop
+    (`source: synthesis`, tu `synthesize --publish` /
+    `POST /api/publish`) co cung symbol + cung action + cung
+    `verdict_created_utc` voi bai moi nhat cua symbol do thi tra
+    lai bai cu, khong tao bai moi, khong gui Telegram lai. Bai
+    dang tay (`publish-post` / composer / `POST /api/posts`) luon
+    tao bai moi, khong dedupe. Feed khong co like / comment /
+    reaction / stories.
 
 ## 8. Những điểm đang lệch giữa nghiên cứu và code
 

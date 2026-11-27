@@ -43,6 +43,11 @@ STRINGS = {
             "khi có tín hiệu đạt tiêu chuẩn.\nThời gian: {time}"),
         "tg.place_button": "✅ Đặt lệnh {action} {symbol} {volume} lot",
         "tg.ignore_button": "❌ Bỏ qua",
+        # --- Telegram: tom tat bai phan tich (chi thong tin, khong nut) ---
+        "tg.post_header": "💎 DiamondX10 — PHÂN TÍCH {symbol}: {action}",
+        "tg.post_desk": "Desk: {desk} — {analyst}",
+        "tg.post_confidence": "Độ tin cậy: {value}",
+        "tg.post_summary": "Tóm tắt: {value}",
         # --- Listener: tra loi callback / sua tin nhan ---
         "listener.order_placed": "Đã đặt lệnh",
         "listener.order_placed_heading": "ĐÃ ĐẶT LỆNH — ticket #{ticket}",
@@ -143,6 +148,11 @@ STRINGS = {
             "when a signal meets the criteria.\nTime: {time}"),
         "tg.place_button": "✅ Place {action} {symbol} {volume} lot",
         "tg.ignore_button": "❌ Ignore",
+        # --- Telegram: analysis post summary (informational, no buttons) ---
+        "tg.post_header": "💎 DiamondX10 — ANALYSIS {symbol}: {action}",
+        "tg.post_desk": "Desk: {desk} — {analyst}",
+        "tg.post_confidence": "Confidence: {value}",
+        "tg.post_summary": "Summary: {value}",
         # --- Listener: callback answers / message edits ---
         "listener.order_placed": "Order placed",
         "listener.order_placed_heading": "ORDER PLACED — ticket #{ticket}",

@@ -335,7 +335,8 @@ def cmd_verdict(cfg, file, *, store_path=None):
 
 
 def cmd_synthesize(cfg, desk="forex", symbol=None, *, store_path=None,
-                   out_path=None, feed_factory=None):
+                   out_path=None, feed_factory=None, publish=False,
+                   post_store=None, posts_path=None):
     """Tong hop Yuling cho 1 desk: PTKT tu feed + PTCB da luu.
 
     In khuyen nghi moi symbol (recommendation, he so size, rationale
@@ -343,6 +344,13 @@ def cmd_synthesize(cfg, desk="forex", symbol=None, *, store_path=None,
     decisions/synthesis-<YYYYMMDD>.json (hoac out_path neu truyen).
     Tren may khong co MT5 (provider mt5) thi bao loi sach, tra 1,
     khong traceback. Tra 0 neu xong.
+
+    publish=True: dang them 1 bai phan tich / symbol (xem posts.py):
+    ket luan BUY/SELL khi PTKT co huong va khong bi chan, NEUTRAL khi
+    HOLD hoac bi chan; bai BUY/SELL thi gui tom tat qua Telegram.
+    post_store (PostStore) hoac posts_path (duong dan file kho) chi
+    dung cho test; mac dinh dung kho decisions/analysis-posts.json.
+    Loi dang bai chi in canh bao, khong lam hong ket qua tong hop.
     """
     cfg = cfg or {}
     if desk not in DESKS:
@@ -382,6 +390,8 @@ def cmd_synthesize(cfg, desk="forex", symbol=None, *, store_path=None,
             bars = feed.bars(60)
             sig = generate_signals(desk, bars, symbol=sym, cfg=cfg)
             ta_action = sig["action"]
+            ta_reason = sig.get("reason") or ""
+            ta_levels = sig.get("levels") or {}
         except (ImportError, ConnectionError, ValueError) as exc:
             print(f"LOI ({sym}): {exc}")
             errors.append({"symbol": sym, "error": str(exc)})
@@ -414,6 +424,23 @@ def cmd_synthesize(cfg, desk="forex", symbol=None, *, store_path=None,
         results.append(entry)
         print(f"{sym}: PTKT {ta_action} -> {syn['recommendation']} "
               f"(size {syn['size']:g}) — {syn['rationale']}")
+        if publish:
+            try:
+                from .posts import PostStore, publish_synthesis_post
+                store = (post_store if post_store is not None
+                         else PostStore(posts_path))
+                post, created = publish_synthesis_post(
+                    store, cfg, desk, sym, ta_action, ta_reason,
+                    ta_levels, verdict, syn)
+                if created:
+                    print(f"Da dang bai phan tich: {post['id']} — "
+                          f"{sym} {post['action']}")
+                else:
+                    print(f"Bai phan tich da co (dedupe): {post['id']} — "
+                          f"{sym} {post['action']}")
+            except Exception as exc:  # noqa: BLE001 — loi dang bai khong hong tong hop
+                print(f"CANH BAO: khong dang duoc bai phan tich cho "
+                      f"{sym} ({exc}).")
     out = {
         "date": datetime.now(timezone.utc).strftime("%Y%m%d"),
         "desk": desk,

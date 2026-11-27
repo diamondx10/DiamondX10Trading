@@ -153,7 +153,12 @@ M15) và lệnh 1 lần `mt5-trade` — cả hai dùng chung `process_symbol`
 nên cùng 1 định dạng. `mt5-dry-run` **không gửi** (chỉ xem trước, không
 đặt lệnh). Mọi khuyến nghị đều được ghi vào `decisions/decisions-log.csv`
 **trước** khi gửi Telegram (log trong `process_symbol`, gửi sau khi
-`process_symbol` trả về).
+`process_symbol` trả về). Khuyến nghị live ở trên **tách biệt với tóm
+tắt bài phân tích trên feed trang chủ** (xem `docs/web-ui.md` §8, quy
+tắc 53–54): vòng live **không** đăng bài phân tích và **không** gửi
+tóm tắt bài đăng — bài BUY/SELL chỉ gửi tóm tắt khi được đăng qua
+`synthesize --publish` / `publish-post` / composer, nên không có
+double-send.
 
 Tin chạy tay trước phiên (lệnh `news`, xem `docs/market-news.md`) —
 **vòng lặp không gửi tin tức tự động**, theo quyết định đã chốt.
