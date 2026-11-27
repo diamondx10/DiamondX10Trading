@@ -5,8 +5,10 @@ export interface Position { desk: string; symbol: string; direction: string; ent
 // Portfolio risk report (GET /api/portfolio-risk): same numbers as the
 // `portfolio-risk` CLI. Read-only; no order placement.
 export interface PortfolioExposure { symbol: string; desk: string; direction: string; volume: number; price: number | null; notional_usd: number; signed_notional_usd: number }
-export interface PortfolioVaR { parametric_95: number; parametric_cvar_95: number; historical_95: number; historical_cvar_95: number; mc_95: number; mc_cvar_95: number; limit_usd: number; limit_pct: number; breached: boolean }
-export interface PortfolioMc { paths: number; seed: number | null; horizon_days: number; mean_pnl: number; sd_pnl: number; p5: number; p50: number; p95: number; prob_breach_drawdown_pct: number }
+// VaR / MC co the la null khi co vi the nhung chua du lich su gia
+// chung de tinh (engine tra None kem warning); empty state tra 0.0.
+export interface PortfolioVaR { parametric_95: number | null; parametric_cvar_95: number | null; historical_95: number | null; historical_cvar_95: number | null; mc_95: number | null; mc_cvar_95: number | null; limit_usd: number; limit_pct: number; breached: boolean }
+export interface PortfolioMc { paths: number | null; seed: number | null; horizon_days: number; mean_pnl: number | null; sd_pnl: number | null; p5: number | null; p50: number | null; p95: number | null; prob_breach_drawdown_pct: number | null }
 export interface ComponentVaR { symbol: string; desk: string; var_usd: number; share_pct: number }
 export interface StressCase { name: string; pnl_usd: number; pnl_pct: number; breaches_drawdown: boolean }
 export interface PortfolioRiskReport {
@@ -18,7 +20,7 @@ export interface PortfolioRiskReport {
   var: PortfolioVaR
   mc: PortfolioMc
   component_var: ComponentVaR[]
-  concentration: { largest_symbol: string | null; largest_share_pct: number }
+  concentration: { largest_symbol: string | null; largest_share_pct: number | null }
   stress: StressCase[]
   warnings: string[]
   notes: string[]

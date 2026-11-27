@@ -923,6 +923,23 @@
     (chua du mau thi khong de xuat); AI chinh mo hinh TA tu du lieu
     log, khong thay the mo hinh TA hay cac gate cung. Chua kiem
     chung tren thi truong that (can may Windows co MT5 demo).
+66. **[ĐÃ CÓ — 2026-11-28] Rui ro danh muc — VaR co tinh tuong quan
+    + Monte Carlo + stress test** (`src/diamondx10/portfolio_risk.py`,
+    lenh `portfolio-risk`, xem `docs/portfolio-risk.md`): VaR 1 ngay co
+    tinh tuong quan giua cac vi the mo (tham so z 1.645/2.33 + lich su +
+    Monte Carlo Cholesky 10.000 path, seed co dinh, chan troi 1 ngay qua
+    scale sqrt(96) tu return M15); component VaR phan bo Euler theo
+    symbol/desk (cong dung bang VaR danh muc); stress scenario dinh
+    nghia bang YAML (`risk.stress_scenarios`, 7 kich ban mac dinh +
+    ngay te nhat lich su); gioi han VaR `risk.portfolio_var_limit_pct`
+    mac dinh 2.0% von quy (200 USD tren 10.000 USD) — vuot thi bao cao
+    + canh bao Telegram (co `--alert`), KHONG phai cong chan trong vong
+    live. Chi bao cao + canh bao o v1. **Honest limit:** VaR khong phai
+    bao dam; Monte Carlo chuan danh gia thap duoi beo (nhat la crypto);
+    tuong quan tang vot khi khung hoang (stress scenario bu cho); scale
+    sqrt(96) phong dai vol ngay cua FX/co phieu; so tren du lieu mo
+    phong khong co y nghia — can backfill >=90 ngay that moi tin. Chua
+    kiem chung tren thi truong that (can may Windows co MT5 demo).
 
 ## 8. Những điểm đang lệch giữa nghiên cứu và code
 
@@ -1018,6 +1035,15 @@
   `ai.block_on_low_win_prob` (mac dinh TAT) dat sau moi gate cung
   (mục 65); xem `docs/ai-ta-model.md`. Chua kiem chung tren may
   Windows co MT5 demo (train that + du doan that + lenh demo that).
+- [x] Rủi ro danh mục — xong 2026-11-28: VaR có tính tương quan
+  (tham số + lịch sử + Monte Carlo Cholesky, 10.000 path, chân trời
+  1 ngày), component VaR phân bổ Euler theo symbol/desk, stress
+  scenario định nghĩa bằng YAML (`risk.stress_scenarios`, 7 kịch bản
+  mặc định + ngày tệ nhất lịch sử), giới hạn VaR 2% vốn quỹ; chỉ
+  báo cáo + cảnh báo, KHÔNG phải cổng chặn trong vòng live
+  (mục 66); xem `docs/portfolio-risk.md`. Chưa kiểm chứng trên dữ
+  liệu thật: cần backfill ≥90 ngày mới tin các con số; Monte Carlo
+  chuẩn đánh giá thấp đuôi béo (nhất là crypto).
 - [ ] Theo dõi: hạ rủi ro desk vàng xuống 2–3% — chỉ quyết sau khi có số ATR thật từ MT5 demo (mục 8).
 - [ ] **Giới hạn rủi ro toàn quỹ — các con số mặc định Phase F (mục 33): lỗ trong ngày 3% vốn quỹ, tối đa 10 vị thế mở toàn quỹ, tối đa 2 vị thế mở/desk — cần Phu duyệt (giữ nguyên, tăng hay giảm).**
 - [ ] Donchian breakout có dùng cho đường live không — cần Phu duyệt + bằng chứng walk-forward (mục 23).

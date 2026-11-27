@@ -809,7 +809,9 @@ def _empty_portfolio_risk_report(cfg):
     """Payload rong cua GET /api/portfolio-risk: cung shape nhu
     portfolio_risk.build_portfolio_risk_report nhung has_positions
     False, VaR 0.0 — dung khi chua co vi the / lich su, hoac khi
-    module portfolio_risk chua co / loi (khong bao gio 500)."""
+    module portfolio_risk chua co / loi (khong bao gio 500).
+    Gioi han VaR lay tu risk.portfolio_var_limit_pct (mac dinh 2.0%,
+    giong engine) — khong phai gioi han drawdown 10%."""
     try:
         fund = _fund_status(cfg)
         equity = fund.get("equity")
@@ -823,17 +825,14 @@ def _empty_portfolio_risk_report(cfg):
             equity = 0.0
     try:
         limit_pct = float(((cfg or {}).get("risk") or {})
-                          .get("max_drawdown_pct") or 10.0)
+                          .get("portfolio_var_limit_pct") or 2.0)
     except (TypeError, ValueError):
-        limit_pct = 10.0
-    try:
-        demo = bool(((cfg or {}).get("trading") or {})
-                    .get("demo_only", True))
-    except Exception:  # noqa: BLE001 — doc demo loi thi mac dinh True
-        demo = True
+        limit_pct = 2.0
     return {
         "has_positions": False,
-        "demo": demo,
+        # Endpoint khong bao gio truyen demo=True: UI chi hien vi the
+        # that, khong phai danh muc gia lap cua engine.
+        "demo": False,
         "equity_usd": float(equity),
         "symbols": [],
         "exposures": [],
@@ -842,12 +841,12 @@ def _empty_portfolio_risk_report(cfg):
                 "mc_95": 0.0, "mc_cvar_95": 0.0,
                 "limit_usd": round(float(equity) * limit_pct / 100.0, 2),
                 "limit_pct": limit_pct, "breached": False},
-        "mc": {"paths": 0, "seed": None, "horizon_days": 1,
-               "mean_pnl": 0.0, "sd_pnl": 0.0, "p5": 0.0, "p50": 0.0,
-               "p95": 0.0, "prob_breach_drawdown_pct": 0.0},
+        "mc": {"paths": 10000, "seed": 42, "horizon_days": 1,
+               "mean_pnl": None, "sd_pnl": None, "p5": None, "p50": None,
+               "p95": None, "prob_breach_drawdown_pct": None},
         "component_var": [],
         "concentration": {"largest_symbol": None,
-                          "largest_share_pct": 0.0},
+                          "largest_share_pct": None},
         "stress": [],
         "warnings": ["chua co vi the mo — chua tinh duoc VaR"],
         "notes": [],

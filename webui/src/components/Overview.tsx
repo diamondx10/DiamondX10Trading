@@ -46,8 +46,8 @@ function PortfolioRiskSection() {
           ) : <div className="stat-sub">—</div>}
         </div>
       </div>
-      <p className="muted small">{t('portrisk.mcPaths', { paths: r.mc.paths, days: r.mc.horizon_days })}</p>
-      {r.concentration.largest_symbol && (
+      <p className="muted small">{t('portrisk.mcPaths', { paths: r.mc.paths ?? 0, days: r.mc.horizon_days })}</p>
+      {r.concentration.largest_symbol && r.concentration.largest_share_pct !== null && (
         <p className="muted small">{t('portrisk.largest', { symbol: r.concentration.largest_symbol, pct: r.concentration.largest_share_pct.toFixed(1) })}</p>
       )}
       <h3 style={{ marginTop: 16 }}>{t('portrisk.componentVar')}</h3>
